@@ -28,6 +28,7 @@ tracing = "0.1.41"
 rand = "0.8"
 derive_more = { version = "2.0.1", features = ["from"] }
 strum = { version = "0.27.1", features = ["derive"] }
+iroh-gossip = { version = "0.34.1", default-features = false }
 
 [features]
 bin = ["iroh-blobs/rpc"]
