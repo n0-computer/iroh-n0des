@@ -2,10 +2,11 @@ use std::{collections::BTreeSet, time::Duration};
 
 use anyhow::{Context, Result};
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use iroh::NodeId;
-use rcan::{Capability, Expires, Rcan};
+use rcan::{chain::RcanChain, Capability, Expires, Rcan};
 use serde::{Deserialize, Serialize};
 use ssh_key::PrivateKey as SshPrivateKey;
+
+pub type Token = RcanChain<Caps>;
 
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
 pub enum Caps {
@@ -159,10 +160,11 @@ impl<C: Capability + Ord> Capability for CapSet<C> {
 /// Create an rcan token for the api access.
 pub fn create_api_token(
     user_ssh_key: &SshPrivateKey,
-    local_node_id: NodeId,
+    previous_token: Option<&Token>,
+    audience: VerifyingKey,
     max_age: Duration,
     capability: Caps,
-) -> Result<Rcan<Caps>> {
+) -> Result<Token> {
     let issuer: SigningKey = user_ssh_key
         .key_data()
         .ed25519()
@@ -171,11 +173,16 @@ pub fn create_api_token(
         .clone()
         .into();
 
-    // TODO: add Into to iroh-base
-    let audience = VerifyingKey::from_bytes(local_node_id.as_bytes())?;
-    let can =
-        Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
-    Ok(can)
+    let token = if let Some(previous) = previous_token {
+        previous
+            .clone()
+            .with_delegation(&issuer, audience, capability, max_age)?
+    } else {
+        let can =
+            Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
+        Token::from_rcan(can)
+    };
+    Ok(token)
 }
 
 #[cfg(test)]

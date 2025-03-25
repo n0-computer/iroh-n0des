@@ -1,6 +1,6 @@
 use std::{path::Path, time::Duration};
 
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{anyhow, ensure, Result};
 use iroh::{
     endpoint::{RecvStream, SendStream},
     Endpoint, NodeAddr, NodeId,
@@ -16,21 +16,21 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::{
-    caps::Caps,
-    protocol::{ClientMessage, ServerMessage, ALPN},
+    caps::{Caps, Token},
+    protocol::{AuthMessage, ClientMessage, ServerMessage, ALPN},
 };
 
 #[derive(Debug)]
 pub struct Client {
     sender: mpsc::Sender<ActorMessage>,
     _actor_task: AbortOnDropHandle<()>,
-    cap: Rcan<Caps>,
+    cap: Token,
 }
 
 /// Constructs an IPS client
 pub struct ClientBuilder {
+    cap: Token,
     cap_expiry: Duration,
-    cap: Option<Rcan<Caps>>,
     endpoint: Endpoint,
     enable_metrics: Option<Duration>,
 }
@@ -40,7 +40,7 @@ const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 
 impl ClientBuilder {
     pub fn new(endpoint: &Endpoint) -> Self {
         Self {
-            cap: None,
+            cap: Default::default(),
             cap_expiry: DEFAULT_CAP_EXPIRY,
             endpoint: endpoint.clone(),
             enable_metrics: Some(Duration::from_secs(60)),
@@ -72,9 +72,27 @@ impl ClientBuilder {
     /// Creates the capability from the provided private ssh key.
     pub fn ssh_key(mut self, key: &ssh_key::PrivateKey) -> Result<Self> {
         let local_node = self.endpoint.node_id();
-        let rcan = crate::caps::create_api_token(key, local_node, self.cap_expiry, Caps::all())?;
-        self.cap.replace(rcan);
+        self.cap = crate::caps::create_api_token(key, None, local_node.public(), self.cap_expiry, Caps::all())?;
+        Ok(self)
+    }
 
+    /// Loads a private ssh key and rcan token from the given paths, and creates the needed capability.
+    pub async fn ssh_key_and_token_from_files(
+        self,
+        key_path: impl AsRef<Path>,
+        token_path: impl AsRef<Path>,
+    ) -> Result<Self> {
+        let file_content = tokio::fs::read_to_string(key_path).await?;
+        let private_key = ssh_key::PrivateKey::from_openssh(&file_content)?;
+        let token = Token::read_from_file(&token_path).await?;
+        self.ssh_key_and_token(&private_key, &token)
+    }
+
+    /// Creates the capability from the provided private ssh key and rcan token.
+    pub fn ssh_key_and_token(mut self, key: &ssh_key::PrivateKey, token: &Token) -> Result<Self> {
+        let local_node = self.endpoint.node_id();
+        self.cap =
+            crate::caps::create_api_token(key, Some(token), local_node.public(), self.cap_expiry, Caps::all())?;
         Ok(self)
     }
 
@@ -84,13 +102,17 @@ impl ClientBuilder {
             NodeId::from(*cap.audience()) == self.endpoint.node_id(),
             "invalid audience"
         );
-        self.cap.replace(cap);
+
+        self.cap = Token::from_rcan(cap);
         Ok(self)
     }
 
     /// Create a new client, connected to the provide service node
     pub async fn build(self, remote: impl Into<NodeAddr>) -> Result<Client> {
-        let cap = self.cap.context("missing capability")?;
+        if self.cap.is_empty() {
+            anyhow::bail!("missing capability");
+        }
+        let cap = self.cap;
 
         let remote_addr = remote.into();
         let connection = self.endpoint.connect(remote_addr.clone(), ALPN).await?;
@@ -216,7 +238,7 @@ struct Actor {
 #[allow(clippy::large_enum_variant)]
 enum ActorMessage {
     Auth {
-        rcan: Rcan<Caps>,
+        rcan: Token,
         s: oneshot::Sender<anyhow::Result<()>>,
     },
     PutBlob {
@@ -284,7 +306,11 @@ impl Actor {
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
             ActorMessage::Auth { rcan, s } => {
-                if let Err(err) = self.writer.send(ServerMessage::Auth(rcan)).await {
+                if let Err(err) = self
+                    .writer
+                    .send(ServerMessage::Auth(AuthMessage::Rcan(rcan)))
+                    .await
+                {
                     s.send(Err(err.into())).ok();
                     return;
                 }

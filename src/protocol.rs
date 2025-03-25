@@ -1,18 +1,22 @@
 use iroh_blobs::{ticket::BlobTicket, Hash};
-use rcan::Rcan;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::caps::Caps;
+use crate::caps::Token;
 
 pub const ALPN: &[u8] = b"/iroh/n0des/1";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AuthMessage {
+    Rcan(Token),
+}
 
 /// Messages sent from the client to the server
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
     /// Authentication on first request
-    Auth(Rcan<Caps>),
+    Auth(AuthMessage),
     /// Request that the node fetches the given blob.
     PutBlob { ticket: BlobTicket, name: String },
     /// Request the name of a blob held by the node

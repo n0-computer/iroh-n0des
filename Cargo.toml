@@ -19,13 +19,21 @@ serde = { version = "1.0.217", features = ["derive"] }
 tokio-serde = { version = "0.9.0", features = ["bincode"] }
 tokio-util = { version = "0.7.13", features = ["codec"] }
 uuid = { version = "1.12.1", features = ["v4", "serde"] }
-rcan = { git = "https://github.com/n0-computer/rcan", branch = "main" }
+rcan = { git = "https://github.com/n0-computer/rcan", branch = "feat/rcan-chain", features = ["fs"] }
 ed25519-dalek = "2.1.1"
 ssh-key = { version = "0.6.7", features = ["ed25519"] }
 tokio = "1.43.0"
 iroh-metrics = "0.32"
 tracing = "0.1.41"
 rand = "0.8"
+postcard = { version = "1.1.1", features = ["use-std"] }
+ssh-encoding = { version = "0.2.0", features = ["pem", "base64"] }
+clap = { version = "4.5.32", features = ["derive"], optional = true }
+parse_duration = { version = "2.1.1", optional = true }
+hex = "0.4.3"
+time = { version = "0.3.41", features = ["formatting"], optional = true }
+derive_more = { version = "2.0.1", features = ["deref", "from"] }
 
 [features]
-bin = ["iroh-blobs/rpc"]
+default = ["bin"]
+bin = ["iroh-blobs/rpc", "dep:clap", "dep:parse_duration", "dep:time"]
