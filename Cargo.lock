@@ -3610,7 +3610,7 @@ dependencies = [
 [[package]]
 name = "rcan"
 version = "0.1.0"
-source = "git+https://github.com/Frando/rcan?branch=refactor%2Fdelegate-permits#cdea3d480596be1eefbf0534fcf19a6c96faaa7a"
+source = "git+https://github.com/n0-computer/rcan?branch=main#ee64cf69d7626b9d54431796d0d1df0af2a69669"
 dependencies = [
  "anyhow",
  "blake3",
