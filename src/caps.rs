@@ -12,6 +12,15 @@ pub enum Caps {
     V0(CapSet<Cap>),
 }
 
+impl std::ops::Deref for Caps {
+    type Target = CapSet<Cap>;
+
+    fn deref(&self) -> &Self::Target {
+        let Self::V0(ref slf) = self;
+        slf
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Clone)]
 pub enum Cap {
     All,
@@ -52,6 +61,12 @@ impl Capability for Caps {
         let Self::V0(slf) = self;
         let Self::V0(other) = other;
         slf.permits(other)
+    }
+}
+
+impl From<Cap> for Caps {
+    fn from(cap: Cap) -> Self {
+        Self::new([cap])
     }
 }
 
@@ -118,6 +133,18 @@ impl<C: Capability + Ord> CapSet<C> {
 
     pub fn iter(&self) -> impl Iterator<Item = &'_ C> + '_ {
         self.0.iter()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn contains(&self, cap: &C) -> bool {
+        self.0.contains(cap)
     }
 }
 
