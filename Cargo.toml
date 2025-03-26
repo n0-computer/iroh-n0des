@@ -29,3 +29,6 @@ rand = "0.8"
 
 [features]
 bin = ["iroh-blobs/rpc"]
+
+[patch."https://github.com/dignifiedquire/rcan"]
+rcan = { git = "https://github.com/Frando/rcan", branch = "refactor/delegate-permits" }

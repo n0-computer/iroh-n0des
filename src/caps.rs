@@ -48,10 +48,10 @@ impl Caps {
 }
 
 impl Capability for Caps {
-    fn can_delegate(&self, other: &Self) -> bool {
+    fn permits(&self, other: &Self) -> bool {
         let Self::V0(slf) = self;
         let Self::V0(other) = other;
-        slf.can_delegate(other)
+        slf.permits(other)
     }
 }
 
@@ -70,33 +70,30 @@ impl Cap {
 }
 
 impl Capability for Cap {
-    fn can_delegate(&self, other: &Self) -> bool {
+    fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (Cap::All, _) => true,
-            (Cap::Blobs(slf), Cap::Blobs(other)) => slf.can_delegate(other),
-            (Cap::Blobs(_), _) => false,
-            (Cap::Relay(slf), Cap::Relay(other)) => slf.can_delegate(other),
-            (Cap::Relay(_), _) => false,
-            (Cap::Metrics(slf), Cap::Metrics(other)) => slf.can_delegate(other),
-            (Cap::Metrics(_), _) => false,
+            (Cap::Blobs(slf), Cap::Blobs(other)) => slf.permits(other),
+            (Cap::Relay(slf), Cap::Relay(other)) => slf.permits(other),
+            (Cap::Metrics(slf), Cap::Metrics(other)) => slf.permits(other),
+            (_, _) => false,
         }
     }
 }
 
 impl Capability for BlobsCap {
-    fn can_delegate(&self, other: &Self) -> bool {
+    fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (BlobsCap::All, _) => true,
             (BlobsCap::PutBlob, BlobsCap::PutBlob) => true,
-            (BlobsCap::PutBlob, _) => false,
             (BlobsCap::GetTag, BlobsCap::GetTag) => true,
-            (BlobsCap::GetTag, _) => false,
+            (_, _) => false,
         }
     }
 }
 
 impl Capability for MetricsCap {
-    fn can_delegate(&self, other: &Self) -> bool {
+    fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (MetricsCap::PutAny, MetricsCap::PutAny) => true,
         }
@@ -104,7 +101,7 @@ impl Capability for MetricsCap {
 }
 
 impl Capability for RelayCap {
-    fn can_delegate(&self, other: &Self) -> bool {
+    fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (RelayCap::UseUnlimited, RelayCap::UseUnlimited) => true,
         }
@@ -125,10 +122,10 @@ impl<C: Capability + Ord> CapSet<C> {
 }
 
 impl<C: Capability + Ord> Capability for CapSet<C> {
-    fn can_delegate(&self, other: &Self) -> bool {
+    fn permits(&self, other: &Self) -> bool {
         other
             .iter()
-            .all(|other_cap| self.iter().any(|self_cap| self_cap.can_delegate(other_cap)))
+            .all(|other_cap| self.iter().any(|self_cap| self_cap.permits(other_cap)))
     }
 }
 
@@ -168,27 +165,27 @@ mod tests {
 
         let all = Caps::new([Cap::All]);
 
-        assert!(all.can_delegate(&all));
-        assert!(all.can_delegate(&all_listed));
-        assert!(!all_listed.can_delegate(&all));
+        assert!(all.permits(&all));
+        assert!(all.permits(&all_listed));
+        assert!(!all_listed.permits(&all));
 
         let get_tags = Caps::new([Cap::blobs([BlobsCap::GetTag])]);
         let put_blobs = Caps::new([Cap::blobs([BlobsCap::PutBlob])]);
         let relay = Caps::new([Cap::relay([RelayCap::UseUnlimited])]);
 
         for cap in [&get_tags, &put_blobs, &relay] {
-            assert!(all.can_delegate(&cap));
-            assert!(all_listed.can_delegate(&cap));
-            assert!(!cap.can_delegate(&all));
-            assert!(!cap.can_delegate(&all_listed));
+            assert!(all.permits(&cap));
+            assert!(all_listed.permits(&cap));
+            assert!(!cap.permits(&all));
+            assert!(!cap.permits(&all_listed));
         }
 
-        assert!(!get_tags.can_delegate(&put_blobs));
-        assert!(!get_tags.can_delegate(&relay));
+        assert!(!get_tags.permits(&put_blobs));
+        assert!(!get_tags.permits(&relay));
 
         let all_blobs = Caps::new([Cap::blobs([BlobsCap::All])]);
-        assert!(all_blobs.can_delegate(&get_tags));
-        assert!(all_blobs.can_delegate(&put_blobs));
-        assert!(!put_blobs.can_delegate(&all_blobs));
+        assert!(all_blobs.permits(&get_tags));
+        assert!(all_blobs.permits(&put_blobs));
+        assert!(!put_blobs.permits(&all_blobs));
     }
 }
