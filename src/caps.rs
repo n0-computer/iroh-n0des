@@ -23,7 +23,7 @@ pub enum IpsCapV1 {
 }
 
 impl Capability for IpsCap {
-    fn can_delegate(&self, other: &Self) -> bool {
+    fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::V1(IpsCapV1::Web), Self::V1(IpsCapV1::Web)) => true,
             (Self::V1(IpsCapV1::Api), Self::V1(IpsCapV1::Api)) => true,
