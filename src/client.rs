@@ -16,7 +16,7 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::{
-    caps::{IpsCap, IpsCapV1},
+    caps::Caps,
     protocol::{ClientMessage, ServerMessage, ALPN},
 };
 
@@ -24,13 +24,13 @@ use crate::{
 pub struct Client {
     sender: mpsc::Sender<ActorMessage>,
     _actor_task: AbortOnDropHandle<()>,
-    cap: Rcan<IpsCap>,
+    cap: Rcan<Caps>,
 }
 
 /// Constructs an IPS client
 pub struct ClientBuilder {
-    cap: Option<Rcan<IpsCap>>,
     cap_expiry: Duration,
+    cap: Option<Rcan<Caps>>,
     endpoint: Endpoint,
     enable_metrics: Option<Duration>,
 }
@@ -72,23 +72,18 @@ impl ClientBuilder {
     /// Creates the capability from the provided private ssh key.
     pub fn ssh_key(mut self, key: &ssh_key::PrivateKey) -> Result<Self> {
         let local_node = self.endpoint.node_id();
-        let cap = crate::caps::create_api_token(key, local_node, self.cap_expiry)?;
-        self.cap.replace(cap);
+        let rcan = crate::caps::create_api_token(key, local_node, self.cap_expiry, Caps::all())?;
+        self.cap.replace(rcan);
 
         Ok(self)
     }
 
-    /// Sets the capability.
-    pub fn capability(mut self, cap: Rcan<IpsCap>) -> Result<Self> {
-        ensure!(
-            cap.capability() == &IpsCap::V1(IpsCapV1::Api),
-            "invalid capability"
-        );
+    /// Sets the rcan directly.
+    pub fn rcan(mut self, cap: Rcan<Caps>) -> Result<Self> {
         ensure!(
             NodeId::from(*cap.audience()) == self.endpoint.node_id(),
             "invalid audience"
         );
-
         self.cap.replace(cap);
         Ok(self)
     }
@@ -221,7 +216,7 @@ struct Actor {
 #[allow(clippy::large_enum_variant)]
 enum ActorMessage {
     Auth {
-        rcan: Rcan<IpsCap>,
+        rcan: Rcan<Caps>,
         s: oneshot::Sender<anyhow::Result<()>>,
     },
     PutBlob {
