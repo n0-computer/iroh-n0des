@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, str::FromStr, time::Duration};
+use std::{collections::BTreeSet, fmt, str::FromStr, time::Duration};
 
 use anyhow::{bail, Context, Result};
 use ed25519_dalek::SigningKey;
@@ -29,6 +29,7 @@ macro_rules! cap_enum(
 );
 
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "kebab-case")]
 pub enum Caps {
     V0(CapSet<Cap>),
 }
@@ -61,6 +62,7 @@ impl std::ops::Deref for Caps {
     derive_more::From,
     strum::Display,
 )]
+#[serde(rename_all = "kebab-case")]
 pub enum Cap {
     #[strum(to_string = "all")]
     All,
@@ -107,7 +109,7 @@ cap_enum!(
 
 cap_enum!(
     pub enum RelayCap {
-        UseUnlimited,
+        Use,
     }
 );
 
@@ -126,13 +128,13 @@ impl Caps {
         Self::V0(set)
     }
 
-    pub fn from_strs<'a>(strs: impl Iterator<Item = &'a str>) -> Result<Self> {
-        let mut caps = CapSet::default();
-        for s in strs {
-            let cap = Cap::from_str(s).with_context(|| "invalid cap string: {s}")?;
-            caps.insert(cap);
-        }
-        Ok(Self::V0(caps))
+    pub fn from_strs<'a>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self> {
+        Ok(Self::V0(CapSet::from_strs(strs)?))
+    }
+
+    pub fn to_strings(&self) -> Vec<String> {
+        let Self::V0(ref set) = self;
+        set.to_strings()
     }
 }
 
@@ -185,12 +187,12 @@ impl Capability for MetricsCap {
 impl Capability for RelayCap {
     fn permits(&self, other: &Self) -> bool {
         match (self, other) {
-            (RelayCap::UseUnlimited, RelayCap::UseUnlimited) => true,
+            (RelayCap::Use, RelayCap::Use) => true,
         }
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Clone)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
 pub struct CapSet<C: Capability + Ord>(BTreeSet<C>);
 
 impl<C: Capability + Ord> Default for CapSet<C> {
@@ -227,6 +229,26 @@ impl<C: Capability + Ord> CapSet<C> {
 
     pub fn insert(&mut self, cap: impl Into<C>) -> bool {
         self.0.insert(cap.into())
+    }
+
+    pub fn from_strs<'a, E>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self>
+    where
+        C: FromStr<Err = E>,
+        Result<C, E>: anyhow::Context<C, E>,
+    {
+        let mut caps = Self::default();
+        for s in strs {
+            let cap = C::from_str(s).with_context(|| format!("Unknown capability: {s}"))?;
+            caps.insert(cap);
+        }
+        Ok(caps)
+    }
+
+    pub fn to_strings(&self) -> Vec<String>
+    where
+        C: fmt::Display,
+    {
+        self.iter().map(ToString::to_string).collect()
     }
 }
 
@@ -265,42 +287,38 @@ mod tests {
 
     #[test]
     fn smoke() {
-        let all_listed = Caps::default()
+        let all = Caps::default()
             .extend([BlobsCap::PutBlob, BlobsCap::GetBlob, BlobsCap::GetTag])
-            .extend([RelayCap::UseUnlimited])
+            .extend([RelayCap::Use])
             .extend([MetricsCap::PutAny]);
 
         // test to-and-from string conversion
-        println!("all:     {:?}", all_listed);
-        let strings: Vec<String> = all_listed.iter().map(ToString::to_string).collect();
+        println!("all:     {:?}", all);
+        let strings = all.to_strings();
         println!("strings: {:?}", strings);
         let parsed = Caps::from_strs(strings.iter().map(|s| s.as_str())).unwrap();
-        println!("parsed:  {:?}", parsed);
-        assert_eq!(all_listed, parsed);
+        assert_eq!(all, parsed);
 
         // manual parsing from strings
-        let s = ["blobs:put-blob", "relay:use-unlimited"];
-        let caps = Caps::from_strs(s.into_iter()).unwrap();
-        assert_eq!(
-            caps,
-            Caps::new([BlobsCap::PutBlob]).extend([RelayCap::UseUnlimited])
-        );
+        let s = ["blobs:put-blob", "relay:use"];
+        let caps = Caps::from_strs(s).unwrap();
+        assert_eq!(caps, Caps::new([BlobsCap::PutBlob]).extend([RelayCap::Use]));
 
-        let all = Caps::new([Cap::All]);
+        let full = Caps::new([Cap::All]);
 
-        assert!(all.permits(&all));
-        assert!(all.permits(&all_listed));
-        assert!(!all_listed.permits(&all));
+        assert!(full.permits(&full));
+        assert!(full.permits(&all));
+        assert!(!all.permits(&full));
 
         let get_tags = Caps::new([BlobsCap::GetTag]);
         let put_blobs = Caps::new([BlobsCap::PutBlob]);
-        let relay = Caps::new([RelayCap::UseUnlimited]);
+        let relay = Caps::new([RelayCap::Use]);
 
         for cap in [&get_tags, &put_blobs, &relay] {
+            assert!(full.permits(&cap));
             assert!(all.permits(&cap));
-            assert!(all_listed.permits(&cap));
+            assert!(!cap.permits(&full));
             assert!(!cap.permits(&all));
-            assert!(!cap.permits(&all_listed));
         }
 
         assert!(!get_tags.permits(&put_blobs));
