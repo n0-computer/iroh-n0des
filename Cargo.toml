@@ -26,6 +26,8 @@ tokio = "1.43.0"
 iroh-metrics = "0.32"
 tracing = "0.1.41"
 rand = "0.8"
+derive_more = { version = "2.0.1", features = ["from"] }
+strum = { version = "0.27.1", features = ["derive"] }
 
 [features]
 bin = ["iroh-blobs/rpc"]
