@@ -94,6 +94,7 @@ cap_enum!(
     pub enum BlobsCap {
         All,
         PutBlob,
+        GetBlob,
         GetTag,
     }
 );
@@ -166,6 +167,7 @@ impl Capability for BlobsCap {
         match (self, other) {
             (BlobsCap::All, _) => true,
             (BlobsCap::PutBlob, BlobsCap::PutBlob) => true,
+            (BlobsCap::GetBlob, BlobsCap::GetBlob) => true,
             (BlobsCap::GetTag, BlobsCap::GetTag) => true,
             (_, _) => false,
         }
@@ -264,7 +266,7 @@ mod tests {
     #[test]
     fn smoke() {
         let all_listed = Caps::default()
-            .extend([BlobsCap::PutBlob, BlobsCap::GetTag])
+            .extend([BlobsCap::PutBlob, BlobsCap::GetBlob, BlobsCap::GetTag])
             .extend([RelayCap::UseUnlimited])
             .extend([MetricsCap::PutAny]);
 
