@@ -246,7 +246,6 @@ impl Actor {
                 use iroh::metrics::*;
                 use iroh_metrics::core::Metric;
 
-                metrics.insert(RelayMetrics::new(reg));
                 metrics.insert(NetReportMetrics::new(reg));
                 metrics.insert(PortmapMetrics::new(reg));
                 metrics.insert(MagicsockMetrics::new(reg));
