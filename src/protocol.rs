@@ -24,6 +24,8 @@ pub enum ServerMessage {
         label: String,
         bootstrap: Vec<NodeId>,
     },
+    /// Request that the node joins the given tossip topic
+    DeleteTopic { topic: ProtoTopicId },
     /// Request the name of a blob held by the node
     GetTag { name: String },
     /// Request to store the given metrics data
@@ -44,6 +46,8 @@ pub enum ClientMessage {
     PutBlobResponse(Option<String>),
     /// If set, this means it was an error.
     PutTopicResponse(Option<String>),
+    /// If set, this means it was an error.
+    DeleteTopicResponse(Option<String>),
     /// Simple pong response
     Pong {
         req: [u8; 32],

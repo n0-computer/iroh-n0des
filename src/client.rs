@@ -213,6 +213,16 @@ impl Client {
         let res = r.await??;
         Ok(res)
     }
+
+    /// Delete a gossip topic.
+    pub async fn delete_gossip_topic(&mut self, topic: TopicId) -> Result<()> {
+        let (s, r) = oneshot::channel();
+        self.sender
+            .send(ActorMessage::DeleteTopic { topic, s })
+            .await?;
+        let res = r.await??;
+        Ok(res)
+    }
 }
 
 struct Actor {
@@ -262,6 +272,10 @@ enum ActorMessage {
         topic: iroh_gossip::proto::TopicId,
         label: String,
         bootstrap: Vec<NodeId>,
+        s: oneshot::Sender<anyhow::Result<()>>,
+    },
+    DeleteTopic {
+        topic: iroh_gossip::proto::TopicId,
         s: oneshot::Sender<anyhow::Result<()>>,
     },
 }
@@ -428,6 +442,30 @@ impl Actor {
                         ClientMessage::PutTopicResponse(None) => Ok(()),
                         ClientMessage::PutTopicResponse(Some(err)) => {
                             Err(anyhow!("put topic failed: {}", err))
+                        }
+                        _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
+                    },
+                    Some(Err(err)) => Err(anyhow!("failed to receive response: {:?}", err)),
+                    None => Err(anyhow!("connection closed")),
+                };
+                s.send(response).ok();
+            }
+            ActorMessage::DeleteTopic { topic, s } => {
+                if let Err(err) = self
+                    .writer
+                    .send(ServerMessage::DeleteTopic {
+                        topic: *topic.as_bytes(),
+                    })
+                    .await
+                {
+                    s.send(Err(err.into())).ok();
+                    return;
+                }
+                let response = match self.reader.next().await {
+                    Some(Ok(msg)) => match msg {
+                        ClientMessage::DeleteTopicResponse(None) => Ok(()),
+                        ClientMessage::DeleteTopicResponse(Some(err)) => {
+                            Err(anyhow!("delete topic failed: {}", err))
                         }
                         _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
                     },
