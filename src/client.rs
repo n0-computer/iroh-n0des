@@ -1,24 +1,17 @@
 use std::{path::Path, time::Duration};
 
 use anyhow::{anyhow, ensure, Context, Result};
-use iroh::{
-    endpoint::{RecvStream, SendStream},
-    Endpoint, NodeAddr, NodeId,
-};
+use iroh::{Endpoint, NodeAddr, NodeId};
 use iroh_blobs::{ticket::BlobTicket, BlobFormat, Hash};
-use n0_future::{task::AbortOnDropHandle, SinkExt, StreamExt};
+use n0_future::task::AbortOnDropHandle;
 use rand::Rng;
 use rcan::Rcan;
 use tokio::sync::{mpsc, oneshot};
-use tokio_serde::formats::Bincode;
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::{
-    caps::Caps,
-    protocol::{ClientMessage, ServerMessage, ALPN},
-};
+use crate::caps::Caps;
+use crate::protocol::N0desApi;
 
 #[derive(Debug)]
 pub struct Client {
@@ -93,31 +86,13 @@ impl ClientBuilder {
         let cap = self.cap.context("missing capability")?;
 
         let remote_addr = remote.into();
-        let connection = self.endpoint.connect(remote_addr.clone(), ALPN).await?;
-
-        let (send_stream, recv_stream) = connection.open_bi().await?;
-
-        // Delimit frames using a length header
-        let length_delimited_read = FramedRead::new(recv_stream, LengthDelimitedCodec::new());
-        let length_delimited_write = FramedWrite::new(send_stream, LengthDelimitedCodec::new());
-
-        // Deserialize frames
-        let reader = tokio_serde::Framed::new(
-            length_delimited_read,
-            Bincode::<ClientMessage, ServerMessage>::default(),
-        );
-
-        let writer = tokio_serde::Framed::new(
-            length_delimited_write,
-            Bincode::<ClientMessage, ServerMessage>::default(),
-        );
+        let api = N0desApi::connect(self.endpoint.clone(), remote_addr.clone())?;
 
         let (internal_sender, internal_receiver) = mpsc::channel(64);
 
         let actor = Actor {
             _endpoint: self.endpoint,
-            reader,
-            writer,
+            api,
             internal_receiver,
             internal_sender: internal_sender.clone(),
             session_id: Uuid::new_v4(),
@@ -186,7 +161,7 @@ impl Client {
     }
 
     /// Get the `Hash` behind the tag, if available.
-    pub async fn get_tag(&mut self, name: String) -> Result<Hash> {
+    pub async fn get_tag(&mut self, name: String) -> Result<Option<Hash>> {
         let (s, r) = oneshot::channel();
         self.sender.send(ActorMessage::GetTag { name, s }).await?;
         let res = r.await??;
@@ -196,18 +171,7 @@ impl Client {
 
 struct Actor {
     _endpoint: Endpoint,
-    reader: tokio_serde::Framed<
-        FramedRead<RecvStream, LengthDelimitedCodec>,
-        ClientMessage,
-        ServerMessage,
-        Bincode<ClientMessage, ServerMessage>,
-    >,
-    writer: tokio_serde::Framed<
-        FramedWrite<SendStream, LengthDelimitedCodec>,
-        ClientMessage,
-        ServerMessage,
-        Bincode<ClientMessage, ServerMessage>,
-    >,
+    api: N0desApi,
     internal_receiver: mpsc::Receiver<ActorMessage>,
     internal_sender: mpsc::Sender<ActorMessage>,
     session_id: Uuid,
@@ -235,7 +199,7 @@ enum ActorMessage {
     },
     GetTag {
         name: String,
-        s: oneshot::Sender<anyhow::Result<Hash>>,
+        s: oneshot::Sender<anyhow::Result<Option<Hash>>>,
     },
 }
 
@@ -282,102 +246,56 @@ impl Actor {
 
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
-            ActorMessage::Auth { rcan, s } => {
-                if let Err(err) = self.writer.send(ServerMessage::Auth(rcan)).await {
-                    s.send(Err(err.into())).ok();
-                    return;
+            ActorMessage::Auth { rcan, s } => match self.api.auth(rcan).await {
+                Ok(()) => {
+                    s.send(Ok(())).ok();
                 }
-
-                let response = match self.reader.next().await {
-                    Some(Ok(msg)) => match msg {
-                        ClientMessage::AuthResponse(None) => Ok(()),
-                        ClientMessage::AuthResponse(Some(err)) => {
-                            Err(anyhow!("failed to authenticate: {}", err))
-                        }
-                        _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
-                    },
-                    Some(Err(err)) => Err(anyhow!("auth: failed to receive response: {:?}", err)),
-                    None => Err(anyhow!("auth: connection closed")),
-                };
-                s.send(response).ok();
-            }
+                Err(err) => {
+                    s.send(Err(err.into())).ok();
+                }
+            },
             ActorMessage::PutBlob { ticket, name, s } => {
-                if let Err(err) = self
-                    .writer
-                    .send(ServerMessage::PutBlob { name, ticket })
-                    .await
-                {
-                    s.send(Err(err.into())).ok();
-                    return;
+                match self.api.put_blob(name, ticket).await {
+                    Ok(()) => {
+                        s.send(Ok(())).ok();
+                    }
+                    Err(err) => {
+                        s.send(Err(err.into())).ok();
+                    }
                 }
-                let response = match self.reader.next().await {
-                    Some(Ok(msg)) => match msg {
-                        ClientMessage::PutBlobResponse(None) => Ok(()),
-                        ClientMessage::PutBlobResponse(Some(err)) => {
-                            Err(anyhow!("upload failed: {}", err))
-                        }
-                        _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
-                    },
-                    Some(Err(err)) => Err(anyhow!("failed to receive response: {:?}", err)),
-                    None => Err(anyhow!("connection closed")),
-                };
-                s.send(response).ok();
             }
-            ActorMessage::GetTag { name, s } => {
-                if let Err(err) = self.writer.send(ServerMessage::GetTag { name }).await {
+            ActorMessage::GetTag { name, s } => match self.api.get_tag(name).await {
+                Ok(maybe_hash) => {
+                    s.send(Ok(maybe_hash)).ok();
+                }
+                Err(err) => {
                     s.send(Err(err.into())).ok();
-                    return;
-                };
-                let response = match self.reader.next().await {
-                    Some(Ok(msg)) => match msg {
-                        ClientMessage::GetTagResponse(maybe_hash) => match maybe_hash {
-                            Some(hash) => Ok(hash),
-                            None => Err(anyhow!("blob not found")),
-                        },
-                        _ => Err(anyhow!("unexpected response: {:?}", msg)),
-                    },
-                    Some(Err(err)) => Err(anyhow!("failed to receive response: {:?}", err)),
-                    None => Err(anyhow!("connection closed")),
-                };
-                s.send(response).ok();
-            }
+                }
+            },
             ActorMessage::PutMetrics {
-                encoded,
                 session_id,
+                encoded,
                 s,
-            } => {
-                let response = self
-                    .writer
-                    .send(ServerMessage::PutMetrics {
-                        encoded,
-                        session_id,
-                    })
-                    .await;
-                // we don't expect a response
-                s.send(response.map_err(Into::into)).ok();
-            }
-            ActorMessage::Ping { req, s } => {
-                if let Err(err) = self.writer.send(ServerMessage::Ping { req }).await {
-                    s.send(Err(err.into())).ok();
-                    return;
+            } => match self.api.put_metrics(session_id, encoded).await {
+                Ok(()) => {
+                    s.send(Ok(())).ok();
                 }
-
-                let response = match self.reader.next().await {
-                    Some(Ok(msg)) => match msg {
-                        ClientMessage::Pong { req: req_back } => {
-                            if req_back != req {
-                                Err(anyhow!("unexpected pong response"))
-                            } else {
-                                Ok(())
-                            }
-                        }
-                        _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
-                    },
-                    Some(Err(err)) => Err(anyhow!("failed to receive response: {:?}", err)),
-                    None => Err(anyhow!("connection closed")),
-                };
-                s.send(response).ok();
-            }
+                Err(err) => {
+                    s.send(Err(err.into())).ok();
+                }
+            },
+            ActorMessage::Ping { req, s } => match self.api.ping(req).await {
+                Ok(res) => {
+                    if res == req {
+                        s.send(Ok(())).ok();
+                    } else {
+                        s.send(Err(anyhow!("unexpected pong resonse").into())).ok();
+                    }
+                }
+                Err(err) => {
+                    s.send(Err(err.into())).ok();
+                }
+            },
         }
     }
 
