@@ -1920,6 +1920,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "iroh-gossip"
+version = "0.34.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71a9d638618fb6a4dac68d59cb694774478ea039bc9afca4709e242726591be1"
+dependencies = [
+ "bytes",
+ "derive_more 1.0.0",
+ "ed25519-dalek",
+ "hex",
+ "indexmap",
+ "iroh-blake3",
+ "iroh-metrics",
+ "n0-future",
+ "postcard",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "serde",
+ "serde-error",
+ "tracing",
+]
+
+[[package]]
 name = "iroh-io"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1955,6 +1977,7 @@ dependencies = [
  "ed25519-dalek",
  "iroh",
  "iroh-blobs",
+ "iroh-gossip",
  "iroh-metrics",
  "n0-future",
  "rand 0.8.5",

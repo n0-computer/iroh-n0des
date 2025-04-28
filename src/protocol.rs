@@ -1,3 +1,4 @@
+use iroh::NodeId;
 use iroh_blobs::{ticket::BlobTicket, Hash};
 use rcan::Rcan;
 use serde::{Deserialize, Serialize};
@@ -7,6 +8,8 @@ use crate::caps::Caps;
 
 pub const ALPN: &[u8] = b"/iroh/n0des/1";
 
+pub type ProtoTopicId = [u8; 32];
+
 /// Messages sent from the client to the server
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +18,14 @@ pub enum ServerMessage {
     Auth(Rcan<Caps>),
     /// Request that the node fetches the given blob.
     PutBlob { ticket: BlobTicket, name: String },
+    /// Request that the node joins the given tossip topic
+    PutTopic {
+        topic: ProtoTopicId,
+        label: String,
+        bootstrap: Vec<NodeId>,
+    },
+    /// Request that the node joins the given tossip topic
+    DeleteTopic { topic: ProtoTopicId },
     /// Request the name of a blob held by the node
     GetTag { name: String },
     /// Request to store the given metrics data
@@ -33,6 +44,10 @@ pub enum ClientMessage {
     AuthResponse(Option<String>),
     /// If set, this means it was an error.
     PutBlobResponse(Option<String>),
+    /// If set, this means it was an error.
+    PutTopicResponse(Option<String>),
+    /// If set, this means it was an error.
+    DeleteTopicResponse(Option<String>),
     /// Simple pong response
     Pong {
         req: [u8; 32],
