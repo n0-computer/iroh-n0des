@@ -27,7 +27,7 @@ pub async fn main() -> Result<()> {
     let remote_node_id: NodeId = std::env::args().nth(1).unwrap().parse()?;
     let remote_node_addr: NodeAddr = remote_node_id.into();
 
-    println!("press ctrl+c once your sshkey is registerd");
+    println!("press ctrl+c once your sshkey is registered");
     tokio::signal::ctrl_c().await?;
 
     // Create iroh services client
@@ -53,7 +53,7 @@ pub async fn main() -> Result<()> {
             client_addr.clone(),
             client_blob.hash,
             BlobFormat::Raw,
-            name.clone().into(),
+            name.clone(),
         )
         .await?;
 

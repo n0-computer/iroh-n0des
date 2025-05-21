@@ -315,8 +315,8 @@ mod tests {
         let relay = Caps::new([RelayCap::Use]);
 
         for cap in [&get_tags, &put_blobs, &relay] {
-            assert!(full.permits(&cap));
-            assert!(all.permits(&cap));
+            assert!(full.permits(cap));
+            assert!(all.permits(cap));
             assert!(!cap.permits(&full));
             assert!(!cap.permits(&all));
         }
