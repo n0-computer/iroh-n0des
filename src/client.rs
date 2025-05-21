@@ -7,6 +7,7 @@ use iroh::{
 };
 use iroh_blobs::{ticket::BlobTicket, BlobFormat, Hash};
 use iroh_gossip::proto::TopicId;
+use iroh_metrics::{MetricsSource, Registry};
 use n0_future::{task::AbortOnDropHandle, SinkExt, StreamExt};
 use rand::Rng;
 use rcan::Rcan;
@@ -116,7 +117,8 @@ impl ClientBuilder {
         let (internal_sender, internal_receiver) = mpsc::channel(64);
 
         let actor = Actor {
-            _endpoint: self.endpoint,
+            metrics: None,
+            endpoint: self.endpoint,
             reader,
             writer,
             internal_receiver,
@@ -226,7 +228,8 @@ impl Client {
 }
 
 struct Actor {
-    _endpoint: Endpoint,
+    metrics: Option<Registry>,
+    endpoint: Endpoint,
     reader: tokio_serde::Framed<
         FramedRead<RecvStream, LengthDelimitedCodec>,
         ClientMessage,
@@ -283,17 +286,9 @@ enum ActorMessage {
 impl Actor {
     async fn run(mut self, enable_metrics: Option<Duration>) {
         if enable_metrics.is_some() {
-            if let Err(err) = iroh_metrics::core::Core::try_init(|reg, metrics| {
-                use iroh::metrics::*;
-                use iroh_metrics::core::Metric;
-
-                metrics.insert(NetReportMetrics::new(reg));
-                metrics.insert(PortmapMetrics::new(reg));
-                metrics.insert(MagicsockMetrics::new(reg));
-            }) {
-                // This is usually okay, as it just means metrics already got initialized somewhere else
-                debug!("failed to initialize metrics: {:?}", err);
-            }
+            let mut registry = Registry::default();
+            registry.register_all(self.endpoint.metrics());
+            self.metrics = Some(registry);
         }
         let metrics_time = enable_metrics.unwrap_or_else(|| Duration::from_secs(60 * 60 * 24));
         let mut metrics_timer = tokio::time::interval(metrics_time);
@@ -478,8 +473,10 @@ impl Actor {
     }
 
     async fn send_metrics(&mut self) {
-        if let Some(core) = iroh_metrics::core::Core::get() {
-            let dump = core.encode();
+        if let Some(registry) = &self.metrics {
+            let dump = registry
+                .encode_openmetrics_to_string()
+                .expect("this never fails");
 
             let (s, r) = oneshot::channel();
             if let Err(err) = self

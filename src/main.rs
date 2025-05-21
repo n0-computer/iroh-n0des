@@ -20,8 +20,7 @@ pub async fn main() -> Result<()> {
 
     let client_router = Router::builder(client_endpoint)
         .accept(iroh_blobs::ALPN, client_blobs.clone())
-        .spawn()
-        .await?;
+        .spawn();
     let client_node_id = client_router.endpoint().node_id();
     debug!("local node: {}", client_node_id,);
 
