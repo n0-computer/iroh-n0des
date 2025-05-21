@@ -1,32 +1,29 @@
 use std::{path::Path, time::Duration};
 
-use anyhow::{anyhow, ensure, Context, Result};
-use iroh::{
-    endpoint::{RecvStream, SendStream},
-    Endpoint, NodeAddr, NodeId,
-};
+use anyhow::{anyhow, ensure, Result};
+use iroh::{Endpoint, NodeAddr, NodeId};
 use iroh_blobs::{ticket::BlobTicket, BlobFormat, Hash};
 use iroh_gossip::proto::TopicId;
 use iroh_metrics::{MetricsSource, Registry};
-use n0_future::{task::AbortOnDropHandle, SinkExt, StreamExt};
+use irpc_iroh::IrohRemoteConnection;
+use n0_future::task::AbortOnDropHandle;
 use rand::Rng;
 use rcan::Rcan;
-use tokio::sync::{mpsc, oneshot};
-use tokio_serde::formats::Bincode;
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tracing::{debug, warn};
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::{
     caps::Caps,
-    protocol::{ClientMessage, ServerMessage, ALPN},
+    protocol::{
+        Auth, DeleteTopic, GetTag, N0desClient, Ping, PutBlob, PutMetrics, PutTopic, RemoteError,
+        ALPN,
+    },
 };
 
 #[derive(Debug)]
 pub struct Client {
-    sender: mpsc::Sender<ActorMessage>,
-    _actor_task: AbortOnDropHandle<()>,
-    cap: Rcan<Caps>,
+    client: N0desClient,
+    _metrics_task: Option<AbortOnDropHandle<()>>,
 }
 
 /// Constructs an IPS client
@@ -91,56 +88,63 @@ impl ClientBuilder {
     }
 
     /// Create a new client, connected to the provide service node
-    pub async fn build(self, remote: impl Into<NodeAddr>) -> Result<Client> {
-        let cap = self.cap.context("missing capability")?;
+    pub async fn build(self, remote: impl Into<NodeAddr>) -> Result<Client, BuildError> {
+        let cap = self.cap.ok_or(BuildError::MissingCapability)?;
+        let conn = IrohRemoteConnection::new(self.endpoint.clone(), remote.into(), ALPN.to_vec());
+        let client = N0desClient::boxed(conn);
 
-        let remote_addr = remote.into();
-        let connection = self.endpoint.connect(remote_addr.clone(), ALPN).await?;
+        // If auth fails, the connection is aborted.
+        let () = client.rpc(Auth { caps: cap }).await?;
 
-        let (send_stream, recv_stream) = connection.open_bi().await?;
-
-        // Delimit frames using a length header
-        let length_delimited_read = FramedRead::new(recv_stream, LengthDelimitedCodec::new());
-        let length_delimited_write = FramedWrite::new(send_stream, LengthDelimitedCodec::new());
-
-        // Deserialize frames
-        let reader = tokio_serde::Framed::new(
-            length_delimited_read,
-            Bincode::<ClientMessage, ServerMessage>::default(),
-        );
-
-        let writer = tokio_serde::Framed::new(
-            length_delimited_write,
-            Bincode::<ClientMessage, ServerMessage>::default(),
-        );
-
-        let (internal_sender, internal_receiver) = mpsc::channel(64);
-
-        let actor = Actor {
-            metrics: None,
-            endpoint: self.endpoint,
-            reader,
-            writer,
-            internal_receiver,
-            internal_sender: internal_sender.clone(),
-            session_id: Uuid::new_v4(),
-        };
-        let enable_metrics = self.enable_metrics;
-        let run_handle = tokio::task::spawn(async move {
-            actor.run(enable_metrics).await;
+        let metrics_task = self.enable_metrics.map(|interval| {
+            AbortOnDropHandle::new(n0_future::task::spawn(
+                MetricsTask {
+                    client: client.clone(),
+                    session_id: Uuid::new_v4(),
+                    endpoint: self.endpoint.clone(),
+                }
+                .run(interval),
+            ))
         });
-        let actor_task = AbortOnDropHandle::new(run_handle);
 
-        let mut this = Client {
-            cap,
-            sender: internal_sender,
-            _actor_task: actor_task,
-        };
-
-        this.authenticate().await?;
-
-        Ok(this)
+        Ok(Client {
+            client,
+            _metrics_task: metrics_task,
+        })
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum BuildError {
+    #[error("Missing capability")]
+    MissingCapability,
+    #[error("Unauthorized")]
+    Unauthorized,
+    #[error("Remote error: {0}")]
+    Remote(#[from] RemoteError),
+    #[error("Connection error: {0}")]
+    Rpc(irpc::Error),
+}
+
+impl From<irpc::Error> for BuildError {
+    fn from(value: irpc::Error) -> Self {
+        match value {
+            irpc::Error::Request(irpc::RequestError::Connection(
+                iroh::endpoint::ConnectionError::ApplicationClosed(frame),
+            )) if frame.error_code == 401u32.into() => Self::Unauthorized,
+            value => Self::Rpc(value),
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Remote error: {0}")]
+    Remote(#[from] RemoteError),
+    #[error("Connection error: {0}")]
+    Rpc(#[from] irpc::Error),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
 impl Client {
@@ -148,17 +152,15 @@ impl Client {
         ClientBuilder::new(endpoint)
     }
 
-    /// Trigger the auth handshake with the server
-    async fn authenticate(&mut self) -> Result<()> {
-        let (s, r) = oneshot::channel();
-        self.sender
-            .send(ActorMessage::Auth {
-                rcan: self.cap.clone(),
-                s,
-            })
-            .await?;
-        r.await??;
-        Ok(())
+    /// Pings the remote node.
+    pub async fn ping(&mut self) -> Result<(), Error> {
+        let req = rand::thread_rng().gen();
+        let pong = self.client.rpc(Ping { req }).await?;
+        if pong.req == req {
+            Ok(())
+        } else {
+            Err(Error::Other(anyhow!("unexpected pong response")))
+        }
     }
 
     /// Transfer the blob from the local iroh node to the service node.
@@ -168,32 +170,16 @@ impl Client {
         hash: Hash,
         format: BlobFormat,
         name: String,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let ticket = BlobTicket::new(node.into(), hash, format)?;
-
-        let (s, r) = oneshot::channel();
-        self.sender
-            .send(ActorMessage::PutBlob { ticket, name, s })
-            .await?;
-        r.await??;
-        Ok(())
-    }
-
-    /// Pings the remote node.
-    pub async fn ping(&mut self) -> Result<()> {
-        let (s, r) = oneshot::channel();
-        let req = rand::thread_rng().gen();
-        self.sender.send(ActorMessage::Ping { req, s }).await?;
-        r.await??;
+        self.client.rpc(PutBlob { name, ticket }).await??;
         Ok(())
     }
 
     /// Get the `Hash` behind the tag, if available.
-    pub async fn get_tag(&mut self, name: String) -> Result<Hash> {
-        let (s, r) = oneshot::channel();
-        self.sender.send(ActorMessage::GetTag { name, s }).await?;
-        let res = r.await??;
-        Ok(res)
+    pub async fn get_tag(&mut self, name: String) -> Result<Option<Hash>, Error> {
+        let maybe_hash = self.client.rpc(GetTag { name }).await??;
+        Ok(maybe_hash)
     }
 
     /// Create a gossip topic.
@@ -202,299 +188,57 @@ impl Client {
         topic: TopicId,
         label: String,
         bootstrap: Vec<NodeId>,
-    ) -> Result<()> {
-        let (s, r) = oneshot::channel();
-        self.sender
-            .send(ActorMessage::PutTopic {
-                topic,
+    ) -> Result<(), Error> {
+        self.client
+            .rpc(PutTopic {
+                topic: *topic.as_bytes(),
                 label,
                 bootstrap,
-                s,
             })
-            .await?;
-        r.await??;
+            .await??;
         Ok(())
     }
 
     /// Delete a gossip topic.
-    pub async fn delete_gossip_topic(&mut self, topic: TopicId) -> Result<()> {
-        let (s, r) = oneshot::channel();
-        self.sender
-            .send(ActorMessage::DeleteTopic { topic, s })
-            .await?;
-        r.await??;
+    pub async fn delete_gossip_topic(&mut self, topic: TopicId) -> Result<(), Error> {
+        self.client
+            .rpc(DeleteTopic {
+                topic: *topic.as_bytes(),
+            })
+            .await??;
         Ok(())
     }
 }
 
-struct Actor {
-    metrics: Option<Registry>,
-    endpoint: Endpoint,
-    reader: tokio_serde::Framed<
-        FramedRead<RecvStream, LengthDelimitedCodec>,
-        ClientMessage,
-        ServerMessage,
-        Bincode<ClientMessage, ServerMessage>,
-    >,
-    writer: tokio_serde::Framed<
-        FramedWrite<SendStream, LengthDelimitedCodec>,
-        ClientMessage,
-        ServerMessage,
-        Bincode<ClientMessage, ServerMessage>,
-    >,
-    internal_receiver: mpsc::Receiver<ActorMessage>,
-    internal_sender: mpsc::Sender<ActorMessage>,
+struct MetricsTask {
+    client: N0desClient,
     session_id: Uuid,
+    endpoint: Endpoint,
 }
 
-#[allow(clippy::large_enum_variant)]
-enum ActorMessage {
-    Auth {
-        rcan: Rcan<Caps>,
-        s: oneshot::Sender<anyhow::Result<()>>,
-    },
-    PutBlob {
-        ticket: BlobTicket,
-        name: String,
-        s: oneshot::Sender<anyhow::Result<()>>,
-    },
-    Ping {
-        req: [u8; 32],
-        s: oneshot::Sender<anyhow::Result<()>>,
-    },
-    PutMetrics {
-        encoded: String,
-        session_id: Uuid,
-        s: oneshot::Sender<anyhow::Result<()>>,
-    },
-    GetTag {
-        name: String,
-        s: oneshot::Sender<anyhow::Result<Hash>>,
-    },
-    PutTopic {
-        topic: iroh_gossip::proto::TopicId,
-        label: String,
-        bootstrap: Vec<NodeId>,
-        s: oneshot::Sender<anyhow::Result<()>>,
-    },
-    DeleteTopic {
-        topic: iroh_gossip::proto::TopicId,
-        s: oneshot::Sender<anyhow::Result<()>>,
-    },
-}
-
-impl Actor {
-    async fn run(mut self, enable_metrics: Option<Duration>) {
-        if enable_metrics.is_some() {
-            let mut registry = Registry::default();
-            registry.register_all(self.endpoint.metrics());
-            self.metrics = Some(registry);
-        }
-        let metrics_time = enable_metrics.unwrap_or_else(|| Duration::from_secs(60 * 60 * 24));
-        let mut metrics_timer = tokio::time::interval(metrics_time);
+impl MetricsTask {
+    async fn run(self, interval: Duration) {
+        let mut registry = Registry::default();
+        registry.register_all(self.endpoint.metrics());
+        let mut metrics_timer = tokio::time::interval(interval);
 
         loop {
-            tokio::select! {
-                biased;
-                msg = self.internal_receiver.recv() => {
-                    match msg {
-                        Some(server_msg) => {
-                            self.handle_message(server_msg).await;
-                        }
-                        None => {
-                            break;
-                        }
-                    }
-                }
-                _ = metrics_timer.tick(), if enable_metrics.is_some() => {
-                    debug!("metrics_timer::tick()");
-                    self.send_metrics().await;
-                }
-            }
-        }
-
-        debug!("shutting down");
-    }
-
-    async fn handle_message(&mut self, msg: ActorMessage) {
-        match msg {
-            ActorMessage::Auth { rcan, s } => {
-                if let Err(err) = self.writer.send(ServerMessage::Auth(rcan)).await {
-                    s.send(Err(err.into())).ok();
-                    return;
-                }
-
-                let response = match self.reader.next().await {
-                    Some(Ok(msg)) => match msg {
-                        ClientMessage::AuthResponse(None) => Ok(()),
-                        ClientMessage::AuthResponse(Some(err)) => {
-                            Err(anyhow!("failed to authenticate: {}", err))
-                        }
-                        _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
-                    },
-                    Some(Err(err)) => Err(anyhow!("auth: failed to receive response: {:?}", err)),
-                    None => Err(anyhow!("auth: connection closed")),
-                };
-                s.send(response).ok();
-            }
-            ActorMessage::PutBlob { ticket, name, s } => {
-                if let Err(err) = self
-                    .writer
-                    .send(ServerMessage::PutBlob { name, ticket })
-                    .await
-                {
-                    s.send(Err(err.into())).ok();
-                    return;
-                }
-                let response = match self.reader.next().await {
-                    Some(Ok(msg)) => match msg {
-                        ClientMessage::PutBlobResponse(None) => Ok(()),
-                        ClientMessage::PutBlobResponse(Some(err)) => {
-                            Err(anyhow!("upload failed: {}", err))
-                        }
-                        _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
-                    },
-                    Some(Err(err)) => Err(anyhow!("failed to receive response: {:?}", err)),
-                    None => Err(anyhow!("connection closed")),
-                };
-                s.send(response).ok();
-            }
-            ActorMessage::GetTag { name, s } => {
-                if let Err(err) = self.writer.send(ServerMessage::GetTag { name }).await {
-                    s.send(Err(err.into())).ok();
-                    return;
-                };
-                let response = match self.reader.next().await {
-                    Some(Ok(msg)) => match msg {
-                        ClientMessage::GetTagResponse(maybe_hash) => match maybe_hash {
-                            Some(hash) => Ok(hash),
-                            None => Err(anyhow!("blob not found")),
-                        },
-                        _ => Err(anyhow!("unexpected response: {:?}", msg)),
-                    },
-                    Some(Err(err)) => Err(anyhow!("failed to receive response: {:?}", err)),
-                    None => Err(anyhow!("connection closed")),
-                };
-                s.send(response).ok();
-            }
-            ActorMessage::PutMetrics {
-                encoded,
-                session_id,
-                s,
-            } => {
-                let response = self
-                    .writer
-                    .send(ServerMessage::PutMetrics {
-                        encoded,
-                        session_id,
-                    })
-                    .await;
-                // we don't expect a response
-                s.send(response.map_err(Into::into)).ok();
-            }
-            ActorMessage::Ping { req, s } => {
-                if let Err(err) = self.writer.send(ServerMessage::Ping { req }).await {
-                    s.send(Err(err.into())).ok();
-                    return;
-                }
-
-                let response = match self.reader.next().await {
-                    Some(Ok(msg)) => match msg {
-                        ClientMessage::Pong { req: req_back } => {
-                            if req_back != req {
-                                Err(anyhow!("unexpected pong response"))
-                            } else {
-                                Ok(())
-                            }
-                        }
-                        _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
-                    },
-                    Some(Err(err)) => Err(anyhow!("failed to receive response: {:?}", err)),
-                    None => Err(anyhow!("connection closed")),
-                };
-                s.send(response).ok();
-            }
-            ActorMessage::PutTopic {
-                topic,
-                label,
-                bootstrap,
-                s,
-            } => {
-                if let Err(err) = self
-                    .writer
-                    .send(ServerMessage::PutTopic {
-                        topic: *topic.as_bytes(),
-                        label,
-                        bootstrap,
-                    })
-                    .await
-                {
-                    s.send(Err(err.into())).ok();
-                    return;
-                }
-                let response = match self.reader.next().await {
-                    Some(Ok(msg)) => match msg {
-                        ClientMessage::PutTopicResponse(None) => Ok(()),
-                        ClientMessage::PutTopicResponse(Some(err)) => {
-                            Err(anyhow!("put topic failed: {}", err))
-                        }
-                        _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
-                    },
-                    Some(Err(err)) => Err(anyhow!("failed to receive response: {:?}", err)),
-                    None => Err(anyhow!("connection closed")),
-                };
-                s.send(response).ok();
-            }
-            ActorMessage::DeleteTopic { topic, s } => {
-                if let Err(err) = self
-                    .writer
-                    .send(ServerMessage::DeleteTopic {
-                        topic: *topic.as_bytes(),
-                    })
-                    .await
-                {
-                    s.send(Err(err.into())).ok();
-                    return;
-                }
-                let response = match self.reader.next().await {
-                    Some(Ok(msg)) => match msg {
-                        ClientMessage::DeleteTopicResponse(None) => Ok(()),
-                        ClientMessage::DeleteTopicResponse(Some(err)) => {
-                            Err(anyhow!("delete topic failed: {}", err))
-                        }
-                        _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
-                    },
-                    Some(Err(err)) => Err(anyhow!("failed to receive response: {:?}", err)),
-                    None => Err(anyhow!("connection closed")),
-                };
-                s.send(response).ok();
+            metrics_timer.tick().await;
+            if let Err(err) = self.send_metrics(&registry).await {
+                warn!("failed to push metrics: {:#?}", err);
             }
         }
     }
 
-    async fn send_metrics(&mut self) {
-        if let Some(registry) = &self.metrics {
-            let dump = registry
-                .encode_openmetrics_to_string()
-                .expect("this never fails");
-
-            let (s, r) = oneshot::channel();
-            if let Err(err) = self
-                .internal_sender
-                .send(ActorMessage::PutMetrics {
-                    encoded: dump,
-                    session_id: self.session_id,
-                    s,
-                })
-                .await
-            {
-                warn!("failed to send internal message: {:?}", err);
-            }
-            // spawn a task, to not block the run loop
-            tokio::task::spawn(async move {
-                let res = r.await;
-                debug!("metrics sent: {:?}", res);
-            });
-        }
+    async fn send_metrics(&self, registry: &iroh_metrics::Registry) -> Result<()> {
+        let dump = registry
+            .encode_openmetrics_to_string()
+            .expect("this never fails");
+        let req = PutMetrics {
+            session_id: self.session_id,
+            encoded: dump,
+        };
+        self.client.rpc(req).await??;
+        Ok(())
     }
 }
