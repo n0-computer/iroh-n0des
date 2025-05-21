@@ -132,7 +132,7 @@ impl From<irpc::Error> for BuildError {
             irpc::Error::Request(irpc::RequestError::Connection(
                 iroh::endpoint::ConnectionError::ApplicationClosed(frame),
             )) if frame.error_code == 401u32.into() => Self::Unauthorized,
-            value @ _ => Self::Rpc(value),
+            value => Self::Rpc(value),
         }
     }
 }

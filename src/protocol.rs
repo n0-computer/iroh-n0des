@@ -20,6 +20,7 @@ impl Service for N0desService {}
 
 #[rpc_requests(N0desService, message = N0desMessage)]
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum N0desProtocol {
     #[rpc(tx=oneshot::Sender<()>)]
     Auth(Auth),
