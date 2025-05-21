@@ -14,6 +14,9 @@ rust-version = "1.81"
 anyhow = "1.0.95"
 derive_more = { version = "2.0.1", features = ["from"] }
 ed25519-dalek = "2.1.1"
+irpc = { git = "https://github.com/n0-computer/irpc", branch = "Frando/manual-accept-with-auth" }
+irpc-derive = { git = "https://github.com/n0-computer/irpc", branch = "Frando/manual-accept-with-auth" }
+irpc-iroh = { git = "https://github.com/n0-computer/irpc", branch = "Frando/manual-accept-with-auth" }
 iroh = "0.35"
 iroh-blobs = "0.35"
 iroh-gossip = { version = "0.35", default-features = false }
@@ -24,9 +27,8 @@ rcan = { git = "https://github.com/n0-computer/rcan", branch = "main" }
 serde = { version = "1.0.217", features = ["derive"] }
 ssh-key = { version = "0.6.7", features = ["ed25519"] }
 strum = { version = "0.27.1", features = ["derive"] }
+thiserror = "2.0.12"
 tokio = "1.43.0"
-tokio-serde = { version = "0.9.0", features = ["bincode"] }
-tokio-util = { version = "0.7.13", features = ["codec"] }
 tracing = "0.1.41"
 uuid = { version = "1.12.1", features = ["v4", "serde"] }
 

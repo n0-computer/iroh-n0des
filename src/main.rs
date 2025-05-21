@@ -69,7 +69,7 @@ pub async fn main() -> Result<()> {
 
     println!("downloaded blob: {:?}", blob);
 
-    let server_hash = rpc_client.get_tag(name).await?;
+    let server_hash = rpc_client.get_tag(name).await?.unwrap();
     assert_eq!(server_hash, client_blob.hash);
 
     println!("waiting for Ctrl+C..");
