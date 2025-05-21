@@ -647,8 +647,8 @@
         <span class="kw">let </span>relay = Caps::new([RelayCap::Use]);
 
         <span class="kw">for </span>cap <span class="kw">in </span>[<span class="kw-2">&amp;</span>get_tags, <span class="kw-2">&amp;</span>put_blobs, <span class="kw-2">&amp;</span>relay] {
-            <span class="macro">assert!</span>(full.permits(<span class="kw-2">&amp;</span>cap));
-            <span class="macro">assert!</span>(all.permits(<span class="kw-2">&amp;</span>cap));
+            <span class="macro">assert!</span>(full.permits(cap));
+            <span class="macro">assert!</span>(all.permits(cap));
             <span class="macro">assert!</span>(!cap.permits(<span class="kw-2">&amp;</span>full));
             <span class="macro">assert!</span>(!cap.permits(<span class="kw-2">&amp;</span>all));
         }

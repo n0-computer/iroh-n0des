@@ -498,10 +498,7 @@
 <a href="#497" id="497">497</a>
 <a href="#498" id="498">498</a>
 <a href="#499" id="499">499</a>
-<a href="#500" id="500">500</a>
-<a href="#501" id="501">501</a>
-<a href="#502" id="502">502</a>
-<a href="#503" id="503">503</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{path::Path, time::Duration};
+<a href="#500" id="500">500</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{path::Path, time::Duration};
 
 <span class="kw">use </span>anyhow::{anyhow, ensure, Context, <span class="prelude-ty">Result</span>};
 <span class="kw">use </span>iroh::{
@@ -510,6 +507,7 @@
 };
 <span class="kw">use </span>iroh_blobs::{ticket::BlobTicket, BlobFormat, Hash};
 <span class="kw">use </span>iroh_gossip::proto::TopicId;
+<span class="kw">use </span>iroh_metrics::{MetricsSource, Registry};
 <span class="kw">use </span>n0_future::{task::AbortOnDropHandle, SinkExt, StreamExt};
 <span class="kw">use </span>rand::Rng;
 <span class="kw">use </span>rcan::Rcan;
@@ -559,7 +557,7 @@
         <span class="self">self
     </span>}
 
-    <span class="doccomment">/// Disbale metrics collection.
+    <span class="doccomment">/// Disable metrics collection.
     </span><span class="kw">pub fn </span>disable_metrics(<span class="kw-2">mut </span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
         <span class="self">self</span>.enable_metrics = <span class="prelude-val">None</span>;
         <span class="self">self
@@ -619,7 +617,8 @@
         <span class="kw">let </span>(internal_sender, internal_receiver) = mpsc::channel(<span class="number">64</span>);
 
         <span class="kw">let </span>actor = Actor {
-            _endpoint: <span class="self">self</span>.endpoint,
+            metrics: <span class="prelude-val">None</span>,
+            endpoint: <span class="self">self</span>.endpoint,
             reader,
             writer,
             internal_receiver,
@@ -713,8 +712,8 @@
                 s,
             })
             .<span class="kw">await</span><span class="question-mark">?</span>;
-        <span class="kw">let </span>res = r.<span class="kw">await</span><span class="question-mark">??</span>;
-        <span class="prelude-val">Ok</span>(res)
+        r.<span class="kw">await</span><span class="question-mark">??</span>;
+        <span class="prelude-val">Ok</span>(())
     }
 
     <span class="doccomment">/// Delete a gossip topic.
@@ -723,13 +722,14 @@
         <span class="self">self</span>.sender
             .send(ActorMessage::DeleteTopic { topic, s })
             .<span class="kw">await</span><span class="question-mark">?</span>;
-        <span class="kw">let </span>res = r.<span class="kw">await</span><span class="question-mark">??</span>;
-        <span class="prelude-val">Ok</span>(res)
+        r.<span class="kw">await</span><span class="question-mark">??</span>;
+        <span class="prelude-val">Ok</span>(())
     }
 }
 
 <span class="kw">struct </span>Actor {
-    _endpoint: Endpoint,
+    metrics: <span class="prelude-ty">Option</span>&lt;Registry&gt;,
+    endpoint: Endpoint,
     reader: tokio_serde::Framed&lt;
         FramedRead&lt;RecvStream, LengthDelimitedCodec&gt;,
         ClientMessage,
@@ -786,17 +786,9 @@
 <span class="kw">impl </span>Actor {
     <span class="kw">async fn </span>run(<span class="kw-2">mut </span><span class="self">self</span>, enable_metrics: <span class="prelude-ty">Option</span>&lt;Duration&gt;) {
         <span class="kw">if </span>enable_metrics.is_some() {
-            <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = iroh_metrics::core::Core::try_init(|reg, metrics| {
-                <span class="kw">use </span>iroh::metrics::<span class="kw-2">*</span>;
-                <span class="kw">use </span>iroh_metrics::core::Metric;
-
-                metrics.insert(NetReportMetrics::new(reg));
-                metrics.insert(PortmapMetrics::new(reg));
-                metrics.insert(MagicsockMetrics::new(reg));
-            }) {
-                <span class="comment">// This is usually okay, as it just means metrics already got initialized somewhere else
-                </span><span class="macro">debug!</span>(<span class="string">"failed to initialize metrics: {:?}"</span>, err);
-            }
+            <span class="kw">let </span><span class="kw-2">mut </span>registry = Registry::default();
+            registry.register_all(<span class="self">self</span>.endpoint.metrics());
+            <span class="self">self</span>.metrics = <span class="prelude-val">Some</span>(registry);
         }
         <span class="kw">let </span>metrics_time = enable_metrics.unwrap_or_else(|| Duration::from_secs(<span class="number">60 </span>* <span class="number">60 </span>* <span class="number">24</span>));
         <span class="kw">let </span><span class="kw-2">mut </span>metrics_timer = tokio::time::interval(metrics_time);
@@ -981,8 +973,10 @@
     }
 
     <span class="kw">async fn </span>send_metrics(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(core) = iroh_metrics::core::Core::get() {
-            <span class="kw">let </span>dump = core.encode();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(registry) = <span class="kw-2">&amp;</span><span class="self">self</span>.metrics {
+            <span class="kw">let </span>dump = registry
+                .encode_openmetrics_to_string()
+                .expect(<span class="string">"this never fails"</span>);
 
             <span class="kw">let </span>(s, r) = oneshot::channel();
             <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = <span class="self">self
