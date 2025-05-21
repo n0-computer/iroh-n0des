@@ -56,7 +56,7 @@ impl ClientBuilder {
         self
     }
 
-    /// Disbale metrics collection.
+    /// Disable metrics collection.
     pub fn disable_metrics(mut self) -> Self {
         self.enable_metrics = None;
         self
@@ -210,8 +210,8 @@ impl Client {
                 s,
             })
             .await?;
-        let res = r.await??;
-        Ok(res)
+        r.await??;
+        Ok(())
     }
 
     /// Delete a gossip topic.
@@ -220,8 +220,8 @@ impl Client {
         self.sender
             .send(ActorMessage::DeleteTopic { topic, s })
             .await?;
-        let res = r.await??;
-        Ok(res)
+        r.await??;
+        Ok(())
     }
 }
 
