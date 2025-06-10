@@ -55,8 +55,60 @@
 <a href="#54" id="54">54</a>
 <a href="#55" id="55">55</a>
 <a href="#56" id="56">56</a>
-<a href="#57" id="57">57</a></pre></div><pre class="rust"><code><span class="kw">use </span>iroh::NodeId;
+<a href="#57" id="57">57</a>
+<a href="#58" id="58">58</a>
+<a href="#59" id="59">59</a>
+<a href="#60" id="60">60</a>
+<a href="#61" id="61">61</a>
+<a href="#62" id="62">62</a>
+<a href="#63" id="63">63</a>
+<a href="#64" id="64">64</a>
+<a href="#65" id="65">65</a>
+<a href="#66" id="66">66</a>
+<a href="#67" id="67">67</a>
+<a href="#68" id="68">68</a>
+<a href="#69" id="69">69</a>
+<a href="#70" id="70">70</a>
+<a href="#71" id="71">71</a>
+<a href="#72" id="72">72</a>
+<a href="#73" id="73">73</a>
+<a href="#74" id="74">74</a>
+<a href="#75" id="75">75</a>
+<a href="#76" id="76">76</a>
+<a href="#77" id="77">77</a>
+<a href="#78" id="78">78</a>
+<a href="#79" id="79">79</a>
+<a href="#80" id="80">80</a>
+<a href="#81" id="81">81</a>
+<a href="#82" id="82">82</a>
+<a href="#83" id="83">83</a>
+<a href="#84" id="84">84</a>
+<a href="#85" id="85">85</a>
+<a href="#86" id="86">86</a>
+<a href="#87" id="87">87</a>
+<a href="#88" id="88">88</a>
+<a href="#89" id="89">89</a>
+<a href="#90" id="90">90</a>
+<a href="#91" id="91">91</a>
+<a href="#92" id="92">92</a>
+<a href="#93" id="93">93</a>
+<a href="#94" id="94">94</a>
+<a href="#95" id="95">95</a>
+<a href="#96" id="96">96</a>
+<a href="#97" id="97">97</a>
+<a href="#98" id="98">98</a>
+<a href="#99" id="99">99</a>
+<a href="#100" id="100">100</a>
+<a href="#101" id="101">101</a>
+<a href="#102" id="102">102</a>
+<a href="#103" id="103">103</a>
+<a href="#104" id="104">104</a>
+<a href="#105" id="105">105</a>
+<a href="#106" id="106">106</a></pre></div><pre class="rust"><code><span class="kw">use </span>anyhow::Result;
+<span class="kw">use </span>iroh::NodeId;
 <span class="kw">use </span>iroh_blobs::{ticket::BlobTicket, Hash};
+<span class="kw">use </span>irpc::{channel::oneshot, Service};
+<span class="kw">use </span>irpc_derive::rpc_requests;
 <span class="kw">use </span>rcan::Rcan;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
 <span class="kw">use </span>uuid::Uuid;
@@ -65,51 +117,97 @@
 
 <span class="kw">pub const </span>ALPN: <span class="kw-2">&amp;</span>[u8] = <span class="string">b"/iroh/n0des/1"</span>;
 
-<span class="kw">pub type </span>ProtoTopicId = [u8; <span class="number">32</span>];
+<span class="kw">pub type </span>N0desClient = irpc::Client&lt;N0desMessage, N0desProtocol, N0desService&gt;;
 
-<span class="doccomment">/// Messages sent from the client to the server
-</span><span class="attr">#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-</span><span class="kw">pub enum </span>ServerMessage {
-    <span class="doccomment">/// Authentication on first request
-    </span>Auth(Rcan&lt;Caps&gt;),
-    <span class="doccomment">/// Request that the node fetches the given blob.
-    </span>PutBlob { ticket: BlobTicket, name: String },
-    <span class="doccomment">/// Request that the node joins the given tossip topic
-    </span>PutTopic {
-        topic: ProtoTopicId,
-        label: String,
-        bootstrap: Vec&lt;NodeId&gt;,
-    },
-    <span class="doccomment">/// Request that the node joins the given tossip topic
-    </span>DeleteTopic { topic: ProtoTopicId },
-    <span class="doccomment">/// Request the name of a blob held by the node
-    </span>GetTag { name: String },
-    <span class="doccomment">/// Request to store the given metrics data
-    </span>PutMetrics { encoded: String, session_id: Uuid },
-    <span class="doccomment">/// Simple ping requests
-    </span>Ping { req: [u8; <span class="number">32</span>] },
+<span class="attr">#[derive(Debug, Clone, Copy)]
+</span><span class="kw">pub struct </span>N0desService;
+
+<span class="kw">impl </span>Service <span class="kw">for </span>N0desService {}
+
+<span class="attr">#[rpc_requests(N0desService, message = N0desMessage)]
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
+</span><span class="kw">pub enum </span>N0desProtocol {
+    <span class="attr">#[rpc(tx=oneshot::Sender&lt;()&gt;)]
+    </span>Auth(Auth),
+    <span class="attr">#[rpc(tx=oneshot::Sender&lt;RemoteResult&lt;()&gt;&gt;)]
+    </span>PutBlob(PutBlob),
+    <span class="attr">#[rpc(tx=oneshot::Sender&lt;RemoteResult&lt;<span class="prelude-ty">Option</span>&lt;Hash&gt;&gt;&gt;)]
+    </span>GetTag(GetTag),
+    <span class="attr">#[rpc(tx=oneshot::Sender&lt;RemoteResult&lt;()&gt;&gt;)]
+    </span>PutTopic(PutTopic),
+    <span class="attr">#[rpc(tx=oneshot::Sender&lt;RemoteResult&lt;()&gt;&gt;)]
+    </span>DeleteTopic(DeleteTopic),
+    <span class="attr">#[rpc(tx=oneshot::Sender&lt;RemoteResult&lt;()&gt;&gt;)]
+    </span>PutMetrics(PutMetrics),
+    <span class="attr">#[rpc(tx=oneshot::Sender&lt;Pong&gt;)]
+    </span>Ping(Ping),
 }
 
-<span class="doccomment">/// Messages sent from the server to the client
-</span><span class="attr">#[derive(Debug, Clone, Serialize, Deserialize)]
-</span><span class="kw">pub enum </span>ClientMessage {
-    <span class="comment">// Empty reply
-    </span>Ack,
-    <span class="doccomment">/// Authentication response
-    /// if set, error, otherwise ok
-    </span>AuthResponse(<span class="prelude-ty">Option</span>&lt;String&gt;),
-    <span class="doccomment">/// If set, this means it was an error.
-    </span>PutBlobResponse(<span class="prelude-ty">Option</span>&lt;String&gt;),
-    <span class="doccomment">/// If set, this means it was an error.
-    </span>PutTopicResponse(<span class="prelude-ty">Option</span>&lt;String&gt;),
-    <span class="doccomment">/// If set, this means it was an error.
-    </span>DeleteTopicResponse(<span class="prelude-ty">Option</span>&lt;String&gt;),
-    <span class="doccomment">/// Simple pong response
-    </span>Pong {
-        req: [u8; <span class="number">32</span>],
-    },
-    <span class="comment">// if **missing**, means there was an error
-    </span>GetTagResponse(<span class="prelude-ty">Option</span>&lt;Hash&gt;),
+<span class="kw">pub type </span>RemoteResult&lt;T&gt; = <span class="prelude-ty">Result</span>&lt;T, RemoteError&gt;;
+
+<span class="comment">// #[derive(Debug, Serialize, Deserialize)]
+// pub struct RemoteError(pub String);
+
+</span><span class="attr">#[derive(Serialize, Deserialize, thiserror::Error, Debug)]
+</span><span class="kw">pub enum </span>RemoteError {
+    <span class="attr">#[error(<span class="string">"Missing capability: {}"</span>, _0.to_strings().join(<span class="string">", "</span>))]
+    </span>MissingCapability(Caps),
+    <span class="attr">#[error(<span class="string">"Internal server error"</span>)]
+    </span>InternalServerError,
+}
+
+<span class="doccomment">/// Authentication on first request
+</span><span class="attr">#[derive(Debug, Serialize, Deserialize)]
+</span><span class="kw">pub struct </span>Auth {
+    <span class="kw">pub </span>caps: Rcan&lt;Caps&gt;,
+}
+
+<span class="doccomment">/// Request that the node fetches the given blob.
+</span><span class="attr">#[derive(Debug, Serialize, Deserialize)]
+</span><span class="kw">pub struct </span>PutBlob {
+    <span class="kw">pub </span>ticket: BlobTicket,
+    <span class="kw">pub </span>name: String,
+}
+
+<span class="doccomment">/// Request the name of a blob held by the node
+</span><span class="attr">#[derive(Debug, Serialize, Deserialize)]
+</span><span class="kw">pub struct </span>GetTag {
+    <span class="kw">pub </span>name: String,
+}
+
+<span class="kw">pub type </span>ProtoTopicId = [u8; <span class="number">32</span>];
+
+<span class="doccomment">/// Request that the node joins the given tossip topic
+</span><span class="attr">#[derive(Debug, Serialize, Deserialize)]
+</span><span class="kw">pub struct </span>PutTopic {
+    <span class="kw">pub </span>topic: ProtoTopicId,
+    <span class="kw">pub </span>label: String,
+    <span class="kw">pub </span>bootstrap: Vec&lt;NodeId&gt;,
+}
+
+<span class="doccomment">/// Request that the node joins the given tossip topic
+</span><span class="attr">#[derive(Debug, Serialize, Deserialize)]
+</span><span class="kw">pub struct </span>DeleteTopic {
+    <span class="kw">pub </span>topic: ProtoTopicId,
+}
+
+<span class="doccomment">/// Request to store the given metrics data
+</span><span class="attr">#[derive(Debug, Serialize, Deserialize)]
+</span><span class="kw">pub struct </span>PutMetrics {
+    <span class="kw">pub </span>encoded: String,
+    <span class="kw">pub </span>session_id: Uuid,
+}
+
+<span class="doccomment">/// Simple ping requests
+</span><span class="attr">#[derive(Debug, Serialize, Deserialize)]
+</span><span class="kw">pub struct </span>Ping {
+    <span class="kw">pub </span>req: [u8; <span class="number">32</span>],
+}
+
+<span class="doccomment">/// Simple ping response
+</span><span class="attr">#[derive(Debug, Serialize, Deserialize)]
+</span><span class="kw">pub struct </span>Pong {
+    <span class="kw">pub </span>req: [u8; <span class="number">32</span>],
 }
 </code></pre></div></section></main></body></html>
