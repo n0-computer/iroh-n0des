@@ -103,12 +103,10 @@
 <a href="#102" id="102">102</a>
 <a href="#103" id="103">103</a>
 <a href="#104" id="104">104</a>
-<a href="#105" id="105">105</a>
-<a href="#106" id="106">106</a></pre></div><pre class="rust"><code><span class="kw">use </span>anyhow::Result;
+<a href="#105" id="105">105</a></pre></div><pre class="rust"><code><span class="kw">use </span>anyhow::Result;
 <span class="kw">use </span>iroh::NodeId;
 <span class="kw">use </span>iroh_blobs::{ticket::BlobTicket, Hash};
-<span class="kw">use </span>irpc::{channel::oneshot, Service};
-<span class="kw">use </span>irpc_derive::rpc_requests;
+<span class="kw">use </span>irpc::{channel::oneshot, rpc_requests, Service};
 <span class="kw">use </span>rcan::Rcan;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
 <span class="kw">use </span>uuid::Uuid;

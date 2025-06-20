@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["ALPN"],"mod":["caps"],"struct":["Client","ClientBuilder"],"trait":["N0de"]};
+window.SIDEBAR_ITEMS = {"mod":["caps","protocol"],"struct":["Client","ClientBuilder"],"trait":["N0de"]};
