@@ -1,7 +1,8 @@
-pub mod caps;
 mod client;
 mod n0des;
-mod protocol;
+
+pub mod caps;
+pub mod protocol;
 
 pub use self::{
     client::{Client, ClientBuilder},

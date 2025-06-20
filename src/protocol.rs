@@ -1,8 +1,7 @@
 use anyhow::Result;
 use iroh::NodeId;
 use iroh_blobs::{ticket::BlobTicket, Hash};
-use irpc::{channel::oneshot, Service};
-use irpc_derive::rpc_requests;
+use irpc::{channel::oneshot, rpc_requests, Service};
 use rcan::Rcan;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

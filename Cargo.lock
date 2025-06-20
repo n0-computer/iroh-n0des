@@ -1934,7 +1934,6 @@ dependencies = [
  "iroh-gossip",
  "iroh-metrics",
  "irpc",
- "irpc-derive",
  "irpc-iroh",
  "n0-future",
  "paste",
@@ -2052,13 +2051,15 @@ dependencies = [
 
 [[package]]
 name = "irpc"
-version = "0.2.3"
-source = "git+https://github.com/n0-computer/irpc?branch=Frando/manual-accept-with-auth#4e138054cc634d9b4730bae68a29aff46b85b06a"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e645d8bb696998f4610287e650d2cbd09fe15b3668231de6c8d185156dc6e8a"
 dependencies = [
  "anyhow",
  "futures-buffered",
  "futures-util",
  "iroh-quinn",
+ "irpc-derive",
  "n0-future",
  "postcard",
  "rcgen",
@@ -2073,8 +2074,9 @@ dependencies = [
 
 [[package]]
 name = "irpc-derive"
-version = "0.2.3"
-source = "git+https://github.com/n0-computer/irpc?branch=Frando/manual-accept-with-auth#4e138054cc634d9b4730bae68a29aff46b85b06a"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7fa55af7f664a6dd2b790f422009a45d68620f9a63e43dc2da9fc1e1a4c8e01"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2083,8 +2085,9 @@ dependencies = [
 
 [[package]]
 name = "irpc-iroh"
-version = "0.2.3"
-source = "git+https://github.com/n0-computer/irpc?branch=Frando/manual-accept-with-auth#4e138054cc634d9b4730bae68a29aff46b85b06a"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2b7d0eb8e83d58682de32874b280d5db0a712e952b7676d1dd8437cc6c3f811"
 dependencies = [
  "anyhow",
  "getrandom 0.3.2",
