@@ -1936,6 +1936,7 @@ dependencies = [
  "irpc",
  "irpc-iroh",
  "n0-future",
+ "paste",
  "rand 0.8.5",
  "rcan",
  "serde",
