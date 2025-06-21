@@ -2,8 +2,6 @@ use std::{path::Path, time::Duration};
 
 use anyhow::{anyhow, ensure, Result};
 use iroh::{Endpoint, NodeAddr, NodeId};
-use iroh_blobs::{ticket::BlobTicket, BlobFormat, Hash};
-use iroh_gossip::proto::TopicId;
 use iroh_metrics::{MetricsSource, Registry};
 use irpc_iroh::IrohRemoteConnection;
 use n0_future::task::AbortOnDropHandle;
@@ -14,10 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     caps::Caps,
-    protocol::{
-        Auth, DeleteTopic, GetTag, N0desClient, Ping, PutBlob, PutMetrics, PutTopic, RemoteError,
-        ALPN,
-    },
+    protocol::{Auth, N0desClient, Ping, PutMetrics, RemoteError, ALPN},
 };
 
 #[derive(Debug)]
@@ -161,52 +156,6 @@ impl Client {
         } else {
             Err(Error::Other(anyhow!("unexpected pong response")))
         }
-    }
-
-    /// Transfer the blob from the local iroh node to the service node.
-    pub async fn put_blob(
-        &mut self,
-        node: impl Into<NodeAddr>,
-        hash: Hash,
-        format: BlobFormat,
-        name: String,
-    ) -> Result<(), Error> {
-        let ticket = BlobTicket::new(node.into(), hash, format)?;
-        self.client.rpc(PutBlob { name, ticket }).await??;
-        Ok(())
-    }
-
-    /// Get the `Hash` behind the tag, if available.
-    pub async fn get_tag(&mut self, name: String) -> Result<Option<Hash>, Error> {
-        let maybe_hash = self.client.rpc(GetTag { name }).await??;
-        Ok(maybe_hash)
-    }
-
-    /// Create a gossip topic.
-    pub async fn put_gossip_topic(
-        &mut self,
-        topic: TopicId,
-        label: String,
-        bootstrap: Vec<NodeId>,
-    ) -> Result<(), Error> {
-        self.client
-            .rpc(PutTopic {
-                topic: *topic.as_bytes(),
-                label,
-                bootstrap,
-            })
-            .await??;
-        Ok(())
-    }
-
-    /// Delete a gossip topic.
-    pub async fn delete_gossip_topic(&mut self, topic: TopicId) -> Result<(), Error> {
-        self.client
-            .rpc(DeleteTopic {
-                topic: *topic.as_bytes(),
-            })
-            .await??;
-        Ok(())
     }
 }
 
