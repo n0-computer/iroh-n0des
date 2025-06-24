@@ -46,8 +46,8 @@ pub struct Auth {
 /// Request to store the given metrics data
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PutMetrics {
-    pub encoded: String,
     pub session_id: Uuid,
+    pub update: iroh_metrics::Update,
 }
 
 /// Simple ping requests

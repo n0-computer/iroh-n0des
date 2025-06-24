@@ -1640,11 +1640,11 @@ dependencies = [
 [[package]]
 name = "iroh-metrics"
 version = "0.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f70466f14caff7420a14373676947e25e2917af6a5b1bec45825beb2bf1eb6a7"
+source = "git+https://github.com/n0-computer/iroh-metrics?branch=Frando/encoder#02466c25e9b4ec3c0711ee04ee4d26b3e73a73f2"
 dependencies = [
  "iroh-metrics-derive",
  "itoa",
+ "postcard",
  "serde",
  "snafu",
  "tracing",
@@ -1653,8 +1653,7 @@ dependencies = [
 [[package]]
 name = "iroh-metrics-derive"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d12f5c45c4ed2436302a4e03cad9a0ad34b2962ad0c5791e1019c0ee30eeb09"
+source = "git+https://github.com/n0-computer/iroh-metrics?branch=Frando/encoder#02466c25e9b4ec3c0711ee04ee4d26b3e73a73f2"
 dependencies = [
  "heck",
  "proc-macro2",
