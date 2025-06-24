@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["caps","protocol"],"struct":["Client","ClientBuilder"],"trait":["N0de"]};
