@@ -1,8 +1,6 @@
 use anyhow::Result;
 use iroh::{protocol::Router, Endpoint, NodeAddr, NodeId};
-use iroh_blobs::BlobFormat;
 use iroh_n0des::Client;
-use rand::Rng;
 use ssh_key::Algorithm;
 use tracing::debug;
 
@@ -37,44 +35,8 @@ pub async fn main() -> Result<()> {
         .build(remote_node_addr.clone())
         .await?;
 
-    // add blob on the client
-    let num: u64 = rng.gen();
-    let name = format!("my-blob-{num}.txt");
-    let client_blob = client_blobs
-        .client()
-        .add_bytes(format!("hello world-{num}"))
-        .await?;
-
-    // upload the blob
-    println!("uploading blob...");
-    let client_addr = client_router.endpoint().node_addr().await?;
-    rpc_client
-        .put_blob(
-            client_addr.clone(),
-            client_blob.hash,
-            BlobFormat::Raw,
-            name.clone(),
-        )
-        .await?;
-
-    println!("waiting for Ctrl+C to download..");
-    tokio::signal::ctrl_c().await?;
-
-    client_blobs.client().delete_blob(client_blob.hash).await?;
-    let blob = client_blobs
-        .client()
-        .download(client_blob.hash, remote_node_addr)
-        .await?
-        .await?;
-
-    println!("downloaded blob: {:?}", blob);
-
-    let server_hash = rpc_client.get_tag(name).await?.unwrap();
-    assert_eq!(server_hash, client_blob.hash);
-
-    println!("waiting for Ctrl+C..");
-    tokio::signal::ctrl_c().await?;
-
+    rpc_client.ping().await?;
+    println!("ping OK");
     client_router.shutdown().await?;
 
     Ok(())
