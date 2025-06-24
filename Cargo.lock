@@ -1788,9 +1788,9 @@ dependencies = [
 
 [[package]]
 name = "irpc"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e645d8bb696998f4610287e650d2cbd09fe15b3668231de6c8d185156dc6e8a"
+checksum = "8ce3631786a8ad447d39cc5da18c659c1b31641dfefad4e9afc07a19ceccacc2"
 dependencies = [
  "anyhow",
  "futures-buffered",
@@ -1811,9 +1811,9 @@ dependencies = [
 
 [[package]]
 name = "irpc-derive"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7fa55af7f664a6dd2b790f422009a45d68620f9a63e43dc2da9fc1e1a4c8e01"
+checksum = "efeabe1ee5615ea0416340b1a6d71a16f971495859c87fad48633b6497ee7a77"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1822,9 +1822,9 @@ dependencies = [
 
 [[package]]
 name = "irpc-iroh"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2b7d0eb8e83d58682de32874b280d5db0a712e952b7676d1dd8437cc6c3f811"
+checksum = "2328936a6630c463aa1e936dcce4c3ddad95832884046040d9f15891587f9145"
 dependencies = [
  "anyhow",
  "getrandom 0.3.2",
