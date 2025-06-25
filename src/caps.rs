@@ -264,7 +264,6 @@ mod tests {
     #[test]
     fn smoke() {
         let all = Caps::default()
-            .extend([BlobsCap::PutBlob, BlobsCap::GetBlob, BlobsCap::GetTag])
             .extend([RelayCap::Use])
             .extend([MetricsCap::PutAny]);
 
@@ -276,9 +275,12 @@ mod tests {
         assert_eq!(all, parsed);
 
         // manual parsing from strings
-        let s = ["blobs:put-blob", "relay:use"];
+        let s = ["metrics:put-any", "relay:use"];
         let caps = Caps::from_strs(s).unwrap();
-        assert_eq!(caps, Caps::new([BlobsCap::PutBlob]).extend([RelayCap::Use]));
+        assert_eq!(
+            caps,
+            Caps::new([MetricsCap::PutAny]).extend([RelayCap::Use])
+        );
 
         let full = Caps::new([Cap::All]);
 
@@ -286,23 +288,17 @@ mod tests {
         assert!(full.permits(&all));
         assert!(!all.permits(&full));
 
-        let get_tags = Caps::new([BlobsCap::GetTag]);
-        let put_blobs = Caps::new([BlobsCap::PutBlob]);
+        let metrics = Caps::new([MetricsCap::PutAny]);
         let relay = Caps::new([RelayCap::Use]);
 
-        for cap in [&get_tags, &put_blobs, &relay] {
+        for cap in [&metrics, &relay] {
             assert!(full.permits(cap));
             assert!(all.permits(cap));
             assert!(!cap.permits(&full));
             assert!(!cap.permits(&all));
         }
 
-        assert!(!get_tags.permits(&put_blobs));
-        assert!(!get_tags.permits(&relay));
-
-        let all_blobs = Caps::new([BlobsCap::All]);
-        assert!(all_blobs.permits(&get_tags));
-        assert!(all_blobs.permits(&put_blobs));
-        assert!(!put_blobs.permits(&all_blobs));
+        assert!(!metrics.permits(&relay));
+        assert!(!relay.permits(&metrics));
     }
 }
