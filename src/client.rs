@@ -168,7 +168,7 @@ struct MetricsTask {
 impl MetricsTask {
     async fn run(self, interval: Duration) {
         let mut registry = Registry::default();
-        // registry.register_all(self.endpoint.metrics());
+        registry.register_all(self.endpoint.metrics());
         let mut metrics_timer = tokio::time::interval(interval);
 
         loop {

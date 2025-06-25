@@ -1478,7 +1478,7 @@ dependencies = [
 [[package]]
 name = "iroh"
 version = "0.35.0"
-source = "git+https://github.com/n0-computer/iroh?branch=main#bc6e9e3077a62f61f25efcd0bc93540006222e18"
+source = "git+https://github.com/n0-computer/iroh?branch=arqu/hp#824b5549e8d5acf8787ad344ea107a1b6e758bf6"
 dependencies = [
  "aead",
  "anyhow",
@@ -1498,7 +1498,7 @@ dependencies = [
  "igd-next",
  "instant",
  "iroh-base",
- "iroh-metrics 0.34.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "iroh-metrics",
  "iroh-quinn",
  "iroh-quinn-proto",
  "iroh-quinn-udp",
@@ -1508,7 +1508,7 @@ dependencies = [
  "n0-watcher",
  "nested_enum_utils",
  "netdev",
- "netwatch",
+ "netwatch 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "pin-project",
  "pkarr",
  "portmapper",
@@ -1539,7 +1539,7 @@ dependencies = [
 [[package]]
 name = "iroh-base"
 version = "0.35.0"
-source = "git+https://github.com/n0-computer/iroh?branch=main#bc6e9e3077a62f61f25efcd0bc93540006222e18"
+source = "git+https://github.com/n0-computer/iroh?branch=arqu/hp#824b5549e8d5acf8787ad344ea107a1b6e758bf6"
 dependencies = [
  "curve25519-dalek",
  "data-encoding",
@@ -1556,38 +1556,13 @@ dependencies = [
 [[package]]
 name = "iroh-metrics"
 version = "0.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f70466f14caff7420a14373676947e25e2917af6a5b1bec45825beb2bf1eb6a7"
-dependencies = [
- "iroh-metrics-derive 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "itoa",
- "serde",
- "snafu",
- "tracing",
-]
-
-[[package]]
-name = "iroh-metrics"
-version = "0.34.0"
 source = "git+https://github.com/n0-computer/iroh-metrics?branch=main#dcf91e4f373ebb6ae8847d846c9430eb6d4a1d13"
 dependencies = [
- "iroh-metrics-derive 0.2.0 (git+https://github.com/n0-computer/iroh-metrics?branch=main)",
+ "iroh-metrics-derive",
  "itoa",
  "serde",
  "snafu",
  "tracing",
-]
-
-[[package]]
-name = "iroh-metrics-derive"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d12f5c45c4ed2436302a4e03cad9a0ad34b2962ad0c5791e1019c0ee30eeb09"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote",
- "syn 2.0.104",
 ]
 
 [[package]]
@@ -1609,7 +1584,7 @@ dependencies = [
  "derive_more 2.0.1",
  "ed25519-dalek",
  "iroh",
- "iroh-metrics 0.34.0 (git+https://github.com/n0-computer/iroh-metrics?branch=main)",
+ "iroh-metrics",
  "irpc",
  "irpc-iroh",
  "n0-future",
@@ -1681,7 +1656,7 @@ dependencies = [
 [[package]]
 name = "iroh-relay"
 version = "0.35.0"
-source = "git+https://github.com/n0-computer/iroh?branch=main#bc6e9e3077a62f61f25efcd0bc93540006222e18"
+source = "git+https://github.com/n0-computer/iroh?branch=arqu/hp#824b5549e8d5acf8787ad344ea107a1b6e758bf6"
 dependencies = [
  "bytes",
  "cfg_aliases",
@@ -1694,7 +1669,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "iroh-base",
- "iroh-metrics 0.34.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "iroh-metrics",
  "iroh-quinn",
  "iroh-quinn-proto",
  "lru",
@@ -1728,7 +1703,7 @@ dependencies = [
 [[package]]
 name = "irpc"
 version = "0.4.0"
-source = "git+https://github.com/n0-computer/irpc?branch=arqu/hp#cd342c2173aeb8a8f0e3b5ca8da33f3e9d8275ce"
+source = "git+https://github.com/n0-computer/irpc?branch=arqu/hp#e7a6a723948d312e2565116010493e4ea8732f71"
 dependencies = [
  "anyhow",
  "futures-buffered",
@@ -1750,7 +1725,7 @@ dependencies = [
 [[package]]
 name = "irpc-derive"
 version = "0.4.0"
-source = "git+https://github.com/n0-computer/irpc?branch=arqu/hp#cd342c2173aeb8a8f0e3b5ca8da33f3e9d8275ce"
+source = "git+https://github.com/n0-computer/irpc?branch=arqu/hp#e7a6a723948d312e2565116010493e4ea8732f71"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1760,7 +1735,7 @@ dependencies = [
 [[package]]
 name = "irpc-iroh"
 version = "0.4.0"
-source = "git+https://github.com/n0-computer/irpc?branch=arqu/hp#cd342c2173aeb8a8f0e3b5ca8da33f3e9d8275ce"
+source = "git+https://github.com/n0-computer/irpc?branch=arqu/hp#e7a6a723948d312e2565116010493e4ea8732f71"
 dependencies = [
  "anyhow",
  "getrandom 0.3.3",
@@ -2084,6 +2059,40 @@ name = "netwatch"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a829a830199b14989f9bccce6136ab928ab48336ab1f8b9002495dbbbb2edbe"
+dependencies = [
+ "atomic-waker",
+ "bytes",
+ "cfg_aliases",
+ "derive_more 1.0.0",
+ "iroh-quinn-udp",
+ "js-sys",
+ "libc",
+ "n0-future",
+ "n0-watcher",
+ "nested_enum_utils",
+ "netdev",
+ "netlink-packet-core",
+ "netlink-packet-route 0.23.0",
+ "netlink-proto",
+ "netlink-sys",
+ "pin-project-lite",
+ "serde",
+ "snafu",
+ "socket2",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "web-sys",
+ "windows 0.59.0",
+ "windows-result",
+ "wmi",
+]
+
+[[package]]
+name = "netwatch"
+version = "0.6.0"
+source = "git+https://github.com/n0-computer/net-tools?branch=arqu/hp#ed5cf4b648099d6228437b68518e6a9573c0d0ca"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -2549,8 +2558,7 @@ checksum = "f84267b20a16ea918e43c6a88433c2d54fa145c92a811b5b047ccbe153674483"
 [[package]]
 name = "portmapper"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f651ba57abd6d766deb1b86f45b50c189db69204f20126e84f033168c1bf0853"
+source = "git+https://github.com/n0-computer/net-tools?branch=arqu/hp#ed5cf4b648099d6228437b68518e6a9573c0d0ca"
 dependencies = [
  "base64",
  "bytes",
@@ -2559,10 +2567,10 @@ dependencies = [
  "futures-util",
  "hyper-util",
  "igd-next",
- "iroh-metrics 0.34.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "iroh-metrics",
  "libc",
  "nested_enum_utils",
- "netwatch",
+ "netwatch 0.6.0 (git+https://github.com/n0-computer/net-tools?branch=arqu/hp)",
  "num_enum",
  "rand 0.8.5",
  "serde",
