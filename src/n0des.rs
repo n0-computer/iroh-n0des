@@ -1,8 +1,8 @@
-use iroh_metrics::Registry;
 use std::future::Future;
 
 use anyhow::Result;
 use iroh::Endpoint;
+use iroh_metrics::Registry;
 
 /// A trait for nodes that can be spawned and shut down
 pub trait N0de: 'static + Send {
