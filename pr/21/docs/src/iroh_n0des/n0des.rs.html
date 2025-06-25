@@ -12,14 +12,22 @@
 <a href="#11" id="11">11</a>
 <a href="#12" id="12">12</a>
 <a href="#13" id="13">13</a>
-<a href="#14" id="14">14</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::future::Future;
+<a href="#14" id="14">14</a>
+<a href="#15" id="15">15</a>
+<a href="#16" id="16">16</a>
+<a href="#17" id="17">17</a>
+<a href="#18" id="18">18</a></pre></div><pre class="rust"><code><span class="kw">use </span>iroh_metrics::Registry;
+<span class="kw">use </span>std::future::Future;
 
 <span class="kw">use </span>anyhow::Result;
 <span class="kw">use </span>iroh::Endpoint;
 
 <span class="doccomment">/// A trait for nodes that can be spawned and shut down
 </span><span class="kw">pub trait </span>N0de: <span class="lifetime">'static </span>+ Send {
-    <span class="kw">fn </span>spawn(endpoint: Endpoint) -&gt; <span class="kw">impl </span>Future&lt;Output = <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt;&gt; + Send
+    <span class="kw">fn </span>spawn(
+        endpoint: Endpoint,
+        metrics: <span class="kw-2">&amp;mut </span>Registry,
+    ) -&gt; <span class="kw">impl </span>Future&lt;Output = <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt;&gt; + Send
     <span class="kw">where
         </span><span class="self">Self</span>: Sized;
 
