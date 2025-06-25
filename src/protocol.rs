@@ -1,6 +1,4 @@
 use anyhow::Result;
-use iroh::NodeId;
-use iroh_blobs::{ticket::BlobTicket, Hash};
 use irpc::{channel::oneshot, rpc_requests, Service};
 use rcan::Rcan;
 use serde::{Deserialize, Serialize};
@@ -24,23 +22,12 @@ pub enum N0desProtocol {
     #[rpc(tx=oneshot::Sender<()>)]
     Auth(Auth),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
-    PutBlob(PutBlob),
-    #[rpc(tx=oneshot::Sender<RemoteResult<Option<Hash>>>)]
-    GetTag(GetTag),
-    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
-    PutTopic(PutTopic),
-    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
-    DeleteTopic(DeleteTopic),
-    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     PutMetrics(PutMetrics),
     #[rpc(tx=oneshot::Sender<Pong>)]
     Ping(Ping),
 }
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
-
-// #[derive(Debug, Serialize, Deserialize)]
-// pub struct RemoteError(pub String);
 
 #[derive(Serialize, Deserialize, thiserror::Error, Debug)]
 pub enum RemoteError {
@@ -54,35 +41,6 @@ pub enum RemoteError {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Auth {
     pub caps: Rcan<Caps>,
-}
-
-/// Request that the node fetches the given blob.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PutBlob {
-    pub ticket: BlobTicket,
-    pub name: String,
-}
-
-/// Request the name of a blob held by the node
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetTag {
-    pub name: String,
-}
-
-pub type ProtoTopicId = [u8; 32];
-
-/// Request that the node joins the given tossip topic
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PutTopic {
-    pub topic: ProtoTopicId,
-    pub label: String,
-    pub bootstrap: Vec<NodeId>,
-}
-
-/// Request that the node joins the given tossip topic
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DeleteTopic {
-    pub topic: ProtoTopicId,
 }
 
 /// Request to store the given metrics data

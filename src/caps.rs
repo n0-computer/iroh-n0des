@@ -66,8 +66,6 @@ impl std::ops::Deref for Caps {
 pub enum Cap {
     #[strum(to_string = "all")]
     All,
-    #[strum(to_string = "blobs:{0}")]
-    Blobs(BlobsCap),
     #[strum(to_string = "relay:{0}")]
     Relay(RelayCap),
     #[strum(to_string = "metrics:{0}")]
@@ -82,7 +80,6 @@ impl FromStr for Cap {
             Ok(Self::All)
         } else if let Some((domain, inner)) = s.split_once(":") {
             Ok(match domain {
-                "blobs" => Self::Blobs(BlobsCap::from_str(inner)?),
                 "metrics" => Self::Metrics(MetricsCap::from_str(inner)?),
                 "relay" => Self::Relay(RelayCap::from_str(inner)?),
                 _ => bail!("invalid cap domain"),
@@ -92,14 +89,6 @@ impl FromStr for Cap {
         }
     }
 }
-cap_enum!(
-    pub enum BlobsCap {
-        All,
-        PutBlob,
-        GetBlob,
-        GetTag,
-    }
-);
 
 cap_enum!(
     pub enum MetricsCap {
@@ -156,21 +145,8 @@ impl Capability for Cap {
     fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (Cap::All, _) => true,
-            (Cap::Blobs(slf), Cap::Blobs(other)) => slf.permits(other),
             (Cap::Relay(slf), Cap::Relay(other)) => slf.permits(other),
             (Cap::Metrics(slf), Cap::Metrics(other)) => slf.permits(other),
-            (_, _) => false,
-        }
-    }
-}
-
-impl Capability for BlobsCap {
-    fn permits(&self, other: &Self) -> bool {
-        match (self, other) {
-            (BlobsCap::All, _) => true,
-            (BlobsCap::PutBlob, BlobsCap::PutBlob) => true,
-            (BlobsCap::GetBlob, BlobsCap::GetBlob) => true,
-            (BlobsCap::GetTag, BlobsCap::GetTag) => true,
             (_, _) => false,
         }
     }
@@ -288,7 +264,6 @@ mod tests {
     #[test]
     fn smoke() {
         let all = Caps::default()
-            .extend([BlobsCap::PutBlob, BlobsCap::GetBlob, BlobsCap::GetTag])
             .extend([RelayCap::Use])
             .extend([MetricsCap::PutAny]);
 
@@ -300,9 +275,12 @@ mod tests {
         assert_eq!(all, parsed);
 
         // manual parsing from strings
-        let s = ["blobs:put-blob", "relay:use"];
+        let s = ["metrics:put-any", "relay:use"];
         let caps = Caps::from_strs(s).unwrap();
-        assert_eq!(caps, Caps::new([BlobsCap::PutBlob]).extend([RelayCap::Use]));
+        assert_eq!(
+            caps,
+            Caps::new([MetricsCap::PutAny]).extend([RelayCap::Use])
+        );
 
         let full = Caps::new([Cap::All]);
 
@@ -310,23 +288,17 @@ mod tests {
         assert!(full.permits(&all));
         assert!(!all.permits(&full));
 
-        let get_tags = Caps::new([BlobsCap::GetTag]);
-        let put_blobs = Caps::new([BlobsCap::PutBlob]);
+        let metrics = Caps::new([MetricsCap::PutAny]);
         let relay = Caps::new([RelayCap::Use]);
 
-        for cap in [&get_tags, &put_blobs, &relay] {
+        for cap in [&metrics, &relay] {
             assert!(full.permits(cap));
             assert!(all.permits(cap));
             assert!(!cap.permits(&full));
             assert!(!cap.permits(&all));
         }
 
-        assert!(!get_tags.permits(&put_blobs));
-        assert!(!get_tags.permits(&relay));
-
-        let all_blobs = Caps::new([BlobsCap::All]);
-        assert!(all_blobs.permits(&get_tags));
-        assert!(all_blobs.permits(&put_blobs));
-        assert!(!put_blobs.permits(&all_blobs));
+        assert!(!metrics.permits(&relay));
+        assert!(!relay.permits(&metrics));
     }
 }
