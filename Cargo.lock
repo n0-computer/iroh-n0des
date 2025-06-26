@@ -1640,7 +1640,7 @@ dependencies = [
 [[package]]
 name = "iroh-metrics"
 version = "0.34.0"
-source = "git+https://github.com/n0-computer/iroh-metrics?branch=Frando/encoder#02466c25e9b4ec3c0711ee04ee4d26b3e73a73f2"
+source = "git+https://github.com/n0-computer/iroh-metrics?branch=main#b41f03393dde84bde7ceac78c0d1f2f1a67d758e"
 dependencies = [
  "iroh-metrics-derive",
  "itoa",
@@ -1653,7 +1653,7 @@ dependencies = [
 [[package]]
 name = "iroh-metrics-derive"
 version = "0.2.0"
-source = "git+https://github.com/n0-computer/iroh-metrics?branch=Frando/encoder#02466c25e9b4ec3c0711ee04ee4d26b3e73a73f2"
+source = "git+https://github.com/n0-computer/iroh-metrics?branch=main#b41f03393dde84bde7ceac78c0d1f2f1a67d758e"
 dependencies = [
  "heck",
  "proc-macro2",
