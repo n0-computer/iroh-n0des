@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{anyhow, ensure, Result};
 use iroh::{Endpoint, NodeAddr, NodeId};
-use iroh_metrics::{Encoder, Registry};
+use iroh_metrics::{encoding::Encoder, Registry};
 use irpc_iroh::IrohRemoteConnection;
 use n0_future::task::AbortOnDropHandle;
 use rand::Rng;

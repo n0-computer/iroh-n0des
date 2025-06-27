@@ -268,9 +268,9 @@ mod tests {
             .extend([MetricsCap::PutAny]);
 
         // test to-and-from string conversion
-        println!("all:     {:?}", all);
+        println!("all:     {all:?}");
         let strings = all.to_strings();
-        println!("strings: {:?}", strings);
+        println!("strings: {strings:?}");
         let parsed = Caps::from_strs(strings.iter().map(|s| s.as_str())).unwrap();
         assert_eq!(all, parsed);
 

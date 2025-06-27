@@ -47,7 +47,7 @@ pub struct Auth {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PutMetrics {
     pub session_id: Uuid,
-    pub update: iroh_metrics::Update,
+    pub update: iroh_metrics::encoding::Update,
 }
 
 /// Simple ping requests
