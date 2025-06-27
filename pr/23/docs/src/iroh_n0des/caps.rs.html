@@ -304,7 +304,7 @@
 <a href="#303" id="303">303</a>
 <a href="#304" id="304">304</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{collections::BTreeSet, fmt, str::FromStr, time::Duration};
 
-<span class="kw">use </span>anyhow::{Context, <span class="prelude-ty">Result</span>, bail};
+<span class="kw">use </span>anyhow::{bail, Context, <span class="prelude-ty">Result</span>};
 <span class="kw">use </span>ed25519_dalek::SigningKey;
 <span class="kw">use </span>iroh::NodeId;
 <span class="kw">use </span>rcan::{Capability, Expires, Rcan};
