@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, fmt, str::FromStr, time::Duration};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use ed25519_dalek::SigningKey;
 use iroh::NodeId;
 use rcan::{Capability, Expires, Rcan};
@@ -44,7 +44,7 @@ impl std::ops::Deref for Caps {
     type Target = CapSet<Cap>;
 
     fn deref(&self) -> &Self::Target {
-        let Self::V0(ref slf) = self;
+        let Self::V0(slf) = self;
         slf
     }
 }
@@ -122,7 +122,7 @@ impl Caps {
     }
 
     pub fn to_strings(&self) -> Vec<String> {
-        let Self::V0(ref set) = self;
+        let Self::V0(set) = self;
         set.to_strings()
     }
 }
