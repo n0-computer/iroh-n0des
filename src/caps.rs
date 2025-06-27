@@ -44,7 +44,7 @@ impl std::ops::Deref for Caps {
     type Target = CapSet<Cap>;
 
     fn deref(&self) -> &Self::Target {
-        let Self::V0(ref slf) = self;
+        let Self::V0(slf) = self;
         slf
     }
 }
@@ -122,7 +122,7 @@ impl Caps {
     }
 
     pub fn to_strings(&self) -> Vec<String> {
-        let Self::V0(ref set) = self;
+        let Self::V0(set) = self;
         set.to_strings()
     }
 }
@@ -268,9 +268,9 @@ mod tests {
             .extend([MetricsCap::PutAny]);
 
         // test to-and-from string conversion
-        println!("all:     {:?}", all);
+        println!("all:     {all:?}");
         let strings = all.to_strings();
-        println!("strings: {:?}", strings);
+        println!("strings: {strings:?}");
         let parsed = Caps::from_strs(strings.iter().map(|s| s.as_str())).unwrap();
         assert_eq!(all, parsed);
 

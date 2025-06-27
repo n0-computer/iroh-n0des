@@ -1,8 +1,12 @@
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
 use anyhow::{anyhow, ensure, Result};
 use iroh::{Endpoint, NodeAddr, NodeId};
-use iroh_metrics::{MetricsSource, Registry};
+use iroh_metrics::{encoding::Encoder, Registry};
 use irpc_iroh::IrohRemoteConnection;
 use n0_future::task::AbortOnDropHandle;
 use rand::Rng;
@@ -149,7 +153,7 @@ impl Client {
 
     /// Pings the remote node.
     pub async fn ping(&mut self) -> Result<(), Error> {
-        let req = rand::thread_rng().gen();
+        let req = rand::thread_rng().r#gen();
         let pong = self.client.rpc(Ping { req }).await?;
         if pong.req == req {
             Ok(())
@@ -169,23 +173,24 @@ impl MetricsTask {
     async fn run(self, interval: Duration) {
         let mut registry = Registry::default();
         registry.register_all(self.endpoint.metrics());
+        let registry = Arc::new(RwLock::new(registry));
+        let mut encoder = Encoder::new(registry);
+
         let mut metrics_timer = tokio::time::interval(interval);
 
         loop {
             metrics_timer.tick().await;
-            if let Err(err) = self.send_metrics(&registry).await {
+            if let Err(err) = self.send_metrics(&mut encoder).await {
                 warn!("failed to push metrics: {:#?}", err);
             }
         }
     }
 
-    async fn send_metrics(&self, registry: &iroh_metrics::Registry) -> Result<()> {
-        let dump = registry
-            .encode_openmetrics_to_string()
-            .expect("this never fails");
+    async fn send_metrics(&self, encoder: &mut Encoder) -> Result<()> {
+        let update = encoder.export();
         let req = PutMetrics {
             session_id: self.session_id,
-            encoded: dump,
+            update,
         };
         self.client.rpc(req).await??;
         Ok(())
