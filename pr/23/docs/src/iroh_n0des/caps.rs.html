@@ -304,7 +304,7 @@
 <a href="#303" id="303">303</a>
 <a href="#304" id="304">304</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::{collections::BTreeSet, fmt, str::FromStr, time::Duration};
 
-<span class="kw">use </span>anyhow::{bail, Context, <span class="prelude-ty">Result</span>};
+<span class="kw">use </span>anyhow::{Context, <span class="prelude-ty">Result</span>, bail};
 <span class="kw">use </span>ed25519_dalek::SigningKey;
 <span class="kw">use </span>iroh::NodeId;
 <span class="kw">use </span>rcan::{Capability, Expires, Rcan};
@@ -348,7 +348,7 @@
     <span class="kw">type </span>Target = CapSet&lt;Cap&gt;;
 
     <span class="kw">fn </span>deref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="self">Self</span>::Target {
-        <span class="kw">let </span><span class="self">Self</span>::V0(<span class="kw-2">ref </span>slf) = <span class="self">self</span>;
+        <span class="kw">let </span><span class="self">Self</span>::V0(slf) = <span class="self">self</span>;
         slf
     }
 }
@@ -426,7 +426,7 @@
     }
 
     <span class="kw">pub fn </span>to_strings(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;String&gt; {
-        <span class="kw">let </span><span class="self">Self</span>::V0(<span class="kw-2">ref </span>set) = <span class="self">self</span>;
+        <span class="kw">let </span><span class="self">Self</span>::V0(set) = <span class="self">self</span>;
         set.to_strings()
     }
 }

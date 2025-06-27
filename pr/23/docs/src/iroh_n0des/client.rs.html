@@ -202,9 +202,9 @@
     time::Duration,
 };
 
-<span class="kw">use </span>anyhow::{anyhow, ensure, <span class="prelude-ty">Result</span>};
+<span class="kw">use </span>anyhow::{<span class="prelude-ty">Result</span>, anyhow, ensure};
 <span class="kw">use </span>iroh::{Endpoint, NodeAddr, NodeId};
-<span class="kw">use </span>iroh_metrics::{encoding::Encoder, Registry};
+<span class="kw">use </span>iroh_metrics::{Registry, encoding::Encoder};
 <span class="kw">use </span>irpc_iroh::IrohRemoteConnection;
 <span class="kw">use </span>n0_future::task::AbortOnDropHandle;
 <span class="kw">use </span>rand::Rng;
@@ -214,7 +214,7 @@
 
 <span class="kw">use crate</span>::{
     caps::Caps,
-    protocol::{Auth, N0desClient, Ping, PutMetrics, RemoteError, ALPN},
+    protocol::{ALPN, Auth, N0desClient, Ping, PutMetrics, RemoteError},
 };
 
 <span class="attr">#[derive(Debug)]
@@ -351,7 +351,7 @@
 
     <span class="doccomment">/// Pings the remote node.
     </span><span class="kw">pub async fn </span>ping(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
-        <span class="kw">let </span>req = rand::thread_rng().gen();
+        <span class="kw">let </span>req = rand::thread_rng().r#gen();
         <span class="kw">let </span>pong = <span class="self">self</span>.client.rpc(Ping { req }).<span class="kw">await</span><span class="question-mark">?</span>;
         <span class="kw">if </span>pong.req == req {
             <span class="prelude-val">Ok</span>(())
