@@ -28,3 +28,6 @@ thiserror = "2.0.12"
 tokio = "1.45"
 tracing = "0.1.41"
 uuid = { version = "1.17", features = ["v4", "serde"] }
+
+[dev-dependencies]
+iroh-ping = "0.2.0"

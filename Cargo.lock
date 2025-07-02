@@ -1592,6 +1592,7 @@ dependencies = [
  "ed25519-dalek",
  "iroh",
  "iroh-metrics",
+ "iroh-ping",
  "irpc",
  "irpc-iroh",
  "n0-future",
@@ -1604,6 +1605,18 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "iroh-ping"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de531c839b4cf1a414b5c35bf32233a1de06a0935d0fe533448c745d9e784a25"
+dependencies = [
+ "anyhow",
+ "iroh",
+ "iroh-metrics",
+ "n0-snafu",
 ]
 
 [[package]]
