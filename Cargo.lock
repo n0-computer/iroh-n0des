@@ -1592,6 +1592,7 @@ dependencies = [
  "ed25519-dalek",
  "iroh",
  "iroh-metrics",
+ "iroh-n0des-macro",
  "iroh-ping",
  "irpc",
  "irpc-iroh",
@@ -1605,6 +1606,15 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "iroh-n0des-macro"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
