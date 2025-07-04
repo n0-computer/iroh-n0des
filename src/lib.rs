@@ -12,3 +12,5 @@ pub use self::{
     n0des::N0de,
     protocol::ALPN,
 };
+
+pub use iroh_metrics::Registry;

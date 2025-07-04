@@ -5,7 +5,7 @@ use iroh::Endpoint;
 use iroh_metrics::Registry;
 
 /// A trait for nodes that can be spawned and shut down
-pub trait N0de: 'static + Send {
+pub trait N0de: 'static + Send + Sync {
     fn spawn(
         endpoint: Endpoint,
         metrics: &mut Registry,

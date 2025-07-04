@@ -1,4 +1,7 @@
 use proc_macro::TokenStream;
+use proc_macro2::Span;
+use quote::quote;
+use syn::{Ident, ItemFn};
 
 /// Marks a function as a simulation test
 ///
@@ -17,6 +20,20 @@ pub fn sim(_args: TokenStream, input: TokenStream) -> TokenStream {
             .into();
     }
 
-    // Return original function unchanged
-    TokenStream::from(quote::quote! { #input_fn })
+    expand_sim_fn(input_fn)
+}
+
+fn expand_sim_fn(input_fn: ItemFn) -> TokenStream {
+    let name = input_fn.sig.ident.clone();
+    let name_str = name.to_string();
+    let new_name = Ident::new(&format!("n0des_sim_{name}"), Span::call_site());
+    quote! {
+        #[tokio::test]
+        async fn #new_name() -> ::anyhow::Result<()> {
+            #input_fn
+
+            ::iroh_n0des::simulation::run_sim_fn(#name_str, #name).await
+        }
+    }
+    .into()
 }

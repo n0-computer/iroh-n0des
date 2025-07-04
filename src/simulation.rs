@@ -1,28 +1,33 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{
+    future::Future,
+    marker::PhantomData,
+    net::SocketAddr,
+    pin::Pin,
+    sync::{Arc, RwLock},
+};
 
 use anyhow::Result;
 use iroh::{Endpoint, NodeAddr, NodeId, Watcher};
-use iroh_metrics::Registry;
-use n0_future::boxed::BoxFuture;
-use tokio::sync::RwLock;
+use iroh_metrics::{encoding::Encoder, Registry};
+
+use n0_future::{FuturesUnordered, TryStreamExt};
+use proto::{SimClient, SimSession};
 
 use crate::n0des::N0de;
 
-/// A registry to collect endpoint metrics for spawned nodes in a simulation
-type MetricsRegistry = Arc<RwLock<Registry>>;
+pub mod proto;
 
 /// Simulation context passed to each node
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct Context {
-    pub round: usize,
+    pub round: u64,
     pub node_index: usize,
-    pub addrs: Vec<NodeAddr>,
+    pub addrs: Arc<Vec<NodeAddr>>,
 }
 
 impl Context {
-    #[allow(dead_code)]
-    fn all_other_nodes(&self, me: NodeId) -> Vec<NodeAddr> {
+    pub fn all_other_nodes(&self, me: NodeId) -> Vec<NodeAddr> {
         let mut other_nodes = Vec::new();
         for id in self.addrs.iter() {
             if id.node_id != me {
@@ -31,53 +36,98 @@ impl Context {
         }
         other_nodes
     }
+
+    #[allow(unused)]
+    fn self_addr(&self) -> &NodeAddr {
+        &self.addrs[self.node_index]
+    }
 }
 
 pub struct Simulation<N: N0de> {
-    max_ticks: usize,
-    #[allow(clippy::type_complexity)]
-    round: Box<dyn Fn(&Context, &N) -> BoxFuture<Result<bool>>>,
-    #[allow(clippy::type_complexity)]
-    check: Option<Box<dyn Fn(&Context, &N) -> Result<()>>>,
-    nodes: Vec<N>,
-    context: Context,
+    #[allow(unused)]
+    name: String,
+    max_rounds: u64,
+    round_fn: BoxedRoundFn<N>,
+    check_fn: Option<BoxedCheckFn<N>>,
+    nodes: Vec<SimNode<N>>,
+    addrs: Arc<Vec<NodeAddr>>,
+    round: u64,
+    sim_client: Option<SimSession>,
+}
+
+type BoxedRoundFn<N> = Box<
+    dyn for<'a> Fn(&'a Context, &'a N) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>>,
+>;
+
+type BoxedCheckFn<N> = Box<dyn Fn(&Context, &N) -> Result<()>>;
+
+pub trait AsyncCallback<'a, N: 'a, T: 'a>:
+    'static + Send + Fn(&'a Context, &'a N) -> Self::Fut
+{
+    type Fut: Future<Output = Result<T>> + Send;
+}
+
+impl<'a, N: 'a, T: 'a, Out, F> AsyncCallback<'a, N, T> for F
+where
+    Out: Send + Future<Output = Result<T>>,
+    F: 'static + Send + Fn(&'a Context, &'a N) -> Out,
+{
+    type Fut = Out;
 }
 
 impl<N: N0de> Simulation<N> {
-    #[allow(dead_code)]
-    fn builder(
-        round: impl Fn(&Context, &N) -> BoxFuture<Result<bool>> + 'static,
-    ) -> SimulationBuilder<N> {
+    pub fn builder<F>(round: F) -> SimulationBuilder<N>
+    where
+        F: for<'a> AsyncCallback<'a, N, bool>,
+    {
+        let round_fn: BoxedRoundFn<N> =
+            Box::new(move |context: &Context, node: &N| Box::pin(round(context, node)));
         SimulationBuilder::<N> {
-            max_ticks: 100,
+            max_rounds: 100,
             nodes: 2,
-            round: Box::new(round),
-            check: None,
+            round_fn,
+            check_fn: None,
             _node: PhantomData,
         }
     }
 
-    #[allow(dead_code)]
-    async fn run(&self) -> Result<()> {
-        for round_num in 0..self.max_ticks {
-            println!("Round {round_num}");
-            for (i, n) in self.nodes.iter().enumerate() {
-                let mut ctx = self.context.clone();
-                ctx.round = round_num;
+    fn context(&self, node_index: usize) -> Context {
+        Context {
+            addrs: self.addrs.clone(),
+            node_index,
+            round: self.round,
+        }
+    }
+
+    pub async fn run(&mut self) -> Result<()> {
+        while self.round < self.max_rounds {
+            self.run_round().await?;
+            self.round += 1;
+        }
+        Ok(())
+    }
+
+    async fn run_round(&mut self) -> Result<()> {
+        println!("Round {}", self.round);
+        for (i, n) in self.nodes.iter().enumerate() {
+            let ctx = self.context(i);
+            (self.round_fn)(&ctx, &n.node).await?;
+        }
+
+        if let Some(ref client) = self.sim_client {
+            let ctx = self.context(0);
+            for (i, n) in self.nodes.iter_mut().enumerate() {
+                let mut ctx = ctx.clone();
                 ctx.node_index = i;
-
-                (self.round)(&ctx, n).await?;
+                client.put_metrics(&ctx, n).await?;
             }
+        }
 
-            println!("Round {round_num} completed");
-            if let Some(check) = &self.check {
-                for (i, n) in self.nodes.iter().enumerate() {
-                    let mut ctx = self.context.clone();
-                    ctx.round = round_num;
-                    ctx.node_index = i;
-
-                    (check)(&ctx, n)?;
-                }
+        println!("Round {} completed", self.round);
+        if let Some(check) = &self.check_fn {
+            for (i, n) in self.nodes.iter().enumerate() {
+                let ctx = self.context(i);
+                (check)(&ctx, &n.node)?;
             }
         }
         Ok(())
@@ -85,67 +135,107 @@ impl<N: N0de> Simulation<N> {
 }
 
 pub struct SimulationBuilder<N: N0de> {
-    max_ticks: usize,
+    max_rounds: u64,
     nodes: u32,
-    #[allow(clippy::type_complexity)]
-    round: Box<dyn Fn(&Context, &N) -> BoxFuture<Result<bool>>>,
-    #[allow(clippy::type_complexity)]
-    check: Option<Box<dyn Fn(&Context, &N) -> Result<()>>>,
+    round_fn: BoxedRoundFn<N>,
+    check_fn: Option<BoxedCheckFn<N>>,
     _node: PhantomData<N>,
 }
 
 impl<N: N0de> SimulationBuilder<N> {
-    pub fn max_ticks(self, count: usize) -> Self {
+    pub fn max_rounds(self, count: u64) -> Self {
         Self {
-            max_ticks: count,
+            max_rounds: count,
             ..self
         }
     }
 
     pub fn check(self, check: impl Fn(&Context, &N) -> Result<()> + 'static) -> Self {
         Self {
-            check: Some(Box::new(check)),
+            check_fn: Some(Box::new(check)),
             ..self
         }
     }
 
-    pub async fn build(self) -> Result<Simulation<N>> {
-        let mut nodes = vec![];
-        let mut addrs = vec![];
+    pub async fn build(self, simulation_name: &str) -> Result<Simulation<N>> {
+        let nodes: Vec<_> = FuturesUnordered::from_iter(
+            (0..self.nodes).into_iter().map(|_i| SimNode::<N>::spawn()),
+        )
+        .try_collect()
+        .await?;
 
-        let registry: MetricsRegistry = Arc::new(RwLock::new(Registry::default()));
+        let addrs: Vec<_> = FuturesUnordered::from_iter(
+            nodes
+                .iter()
+                .map(|n| async { n.endpoint.node_addr().initialized().await }),
+        )
+        .try_collect()
+        .await?;
 
-        // initialize nodes
-        for _ in 0..self.nodes {
-            let ep = Endpoint::builder()
-                .known_nodes(addrs.clone())
-                .bind()
-                .await?;
-            let addr = ep.node_addr().initialized().await?;
-            addrs.push(addr);
-
-            let mut registry = registry.write().await;
-            let sub = registry.sub_registry_with_label("node", ep.node_id().to_string());
-            sub.register_all(ep.metrics());
-
-            let node = N::spawn(ep, sub).await?;
-            nodes.push(node);
-        }
-
-        let context = Context {
-            round: 0,
-            node_index: 0,
-            addrs,
+        let sim_client = if let Ok(addr) = std::env::var("N0DES_SIM_SERVER") {
+            let addr: SocketAddr = addr.parse()?;
+            println!("sending simulation metrics to {addr}");
+            let client = SimClient::new_quinn_insecure(addr)?;
+            let session = client.session(simulation_name.to_string());
+            Some(session)
+        } else {
+            None
         };
 
         Ok(Simulation {
-            max_ticks: self.max_ticks,
-            round: self.round,
-            check: self.check,
+            name: simulation_name.to_string(),
+            max_rounds: self.max_rounds,
+            round_fn: self.round_fn,
+            check_fn: self.check_fn,
             nodes,
-            context,
+            addrs: Arc::new(addrs),
+            sim_client,
+            round: 0,
         })
     }
+}
+
+pub(crate) struct SimNode<N: N0de> {
+    node: N,
+    endpoint: Endpoint,
+    encoder: Encoder,
+}
+
+impl<N: N0de> SimNode<N> {
+    async fn spawn() -> Result<Self> {
+        let mut registry = Registry::default();
+        let endpoint = Endpoint::builder().bind().await?;
+        registry.register_all(endpoint.metrics());
+        let node = N::spawn(endpoint.clone(), &mut registry).await?;
+        Ok(Self {
+            node,
+            endpoint,
+            encoder: Encoder::new(Arc::new(RwLock::new(registry))),
+        })
+    }
+}
+
+#[doc(hidden)]
+pub async fn run_sim_fn<F, Fut, N, E>(name: &str, sim_fn: F) -> anyhow::Result<()>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<SimulationBuilder<N>, E>>,
+    N: N0de,
+    E: Into<anyhow::Error>,
+{
+    println!("running simulation: {name}");
+    let builder = sim_fn().await.map_err(|err| {
+        let err: anyhow::Error = err.into();
+        err
+    })?;
+    let mut sim = builder.build(name).await?;
+    let res = sim.run().await;
+    match &res {
+        Ok(()) => println!("simulation passed"),
+        Err(err) => println!("simulation failed: {err:#}"),
+    };
+    res?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -180,25 +270,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_simulation() {
-        let tick = |ctx: &Context, node: &ExampleN0de| -> BoxFuture<Result<bool>> {
+        async fn tick(ctx: &Context, node: &ExampleN0de) -> Result<bool> {
             let me = node.router.endpoint().node_id();
             let other_nodes = ctx.all_other_nodes(me);
             let ping = node.ping.clone();
             let endpoint = node.router.endpoint().clone();
             let node_index = ctx.node_index;
 
-            Box::pin(async move {
-                if node_index % 2 == 0 {
-                    for other in other_nodes.iter() {
-                        println!("Sending message:\n\tfrom: {me}\n\t to:   {}", other.node_id);
-                        ping.ping(&endpoint, (other.clone()).into()).await?;
-                    }
+            if node_index % 2 == 0 {
+                for other in other_nodes.iter() {
+                    println!("Sending message:\n\tfrom: {me}\n\t to:   {}", other.node_id);
+                    ping.ping(&endpoint, (other.clone()).into()).await?;
                 }
-                Ok(true)
-            })
-        };
+            }
+            Ok(true)
+        }
 
-        let check = |ctx: &Context, node: &ExampleN0de| -> Result<()> {
+        fn check(ctx: &Context, node: &ExampleN0de) -> Result<()> {
             let metrics = node.ping.metrics();
             let node_count = ctx.addrs.len() as u64;
             match ctx.node_index % 2 {
@@ -206,12 +294,12 @@ mod tests {
                 _ => assert_eq!(metrics.pings_recv.get(), node_count / 2),
             }
             Ok(())
-        };
+        }
 
-        let sim: Simulation<ExampleN0de> = Simulation::builder(tick)
-            .max_ticks(1) // currently stuck on one tick, because more ends with an "endpoint closing" error
+        let mut sim: Simulation<ExampleN0de> = Simulation::builder(tick)
+            .max_rounds(1) // currently stuck on one tick, because more ends with an "endpoint closing" error
             .check(check)
-            .build()
+            .build("test_simulation")
             .await
             .unwrap();
 

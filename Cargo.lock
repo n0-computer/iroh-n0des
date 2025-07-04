@@ -3,6 +3,20 @@
 version = 4
 
 [[package]]
+name = "acto"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a026259da4f1a13b4af60cda453c392de64c58c12d239c560923e0382f42f2b9"
+dependencies = [
+ "parking_lot",
+ "pin-project-lite",
+ "rustc_version",
+ "smol_str",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -548,6 +562,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c9e6a11ca8224451684bc0d7d5a7adbf8f2fd6887261a1cfc3c0432f9d4068e"
 dependencies = [
  "powerfmt",
+ "serde",
 ]
 
 [[package]]
@@ -1528,6 +1543,7 @@ dependencies = [
  "strum 0.26.3",
  "stun-rs",
  "surge-ping",
+ "swarm-discovery",
  "time",
  "tokio",
  "tokio-stream",
@@ -1594,6 +1610,7 @@ dependencies = [
  "iroh-metrics",
  "iroh-n0des-macro",
  "iroh-ping",
+ "iroh-quinn",
  "irpc",
  "irpc-iroh",
  "n0-future",
@@ -1603,6 +1620,7 @@ dependencies = [
  "ssh-key",
  "strum 0.27.1",
  "thiserror 2.0.12",
+ "time",
  "tokio",
  "tracing",
  "uuid",
@@ -3281,6 +3299,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
+name = "smol_str"
+version = "0.1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fad6c857cbab2627dcf01ec85a623ca4e7dcb5691cbaa3d7fb7653671f0d09c9"
+
+[[package]]
 name = "snafu"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3470,6 +3494,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "swarm-discovery"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4eae338a4551897c6a50fa2c041c4b75f578962d9fca8adb828cf81f7158740f"
+dependencies = [
+ "acto",
+ "hickory-proto",
+ "rand 0.9.1",
+ "socket2",
+ "thiserror 2.0.12",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3603,11 +3642,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7619e19bc266e0f9c5e6686659d394bc57973859340060a69221e57dbc0c40"
 dependencies = [
  "deranged",
+ "itoa",
  "js-sys",
  "num-conv",
  "powerfmt",
  "serde",
  "time-core",
+ "time-macros",
 ]
 
 [[package]]
@@ -3615,6 +3656,16 @@ name = "time-core"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9e9a38711f559d9e3ce1cdb06dd7c5b8ea546bc90052da6d06bb76da74bb07c"
+
+[[package]]
+name = "time-macros"
+version = "0.2.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3526739392ec93fd8b359c8e98514cb3e8e021beb4e5f597b00a0221f8ed8a49"
+dependencies = [
+ "num-conv",
+ "time-core",
+]
 
 [[package]]
 name = "tinystr"
