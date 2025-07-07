@@ -1,9 +1,8 @@
 use std::{
     future::Future,
     marker::PhantomData,
-    net::SocketAddr,
     pin::Pin,
-    sync::{Arc, RwLock},
+    sync::{Arc, OnceLock, RwLock},
     time::Duration,
 };
 
@@ -206,15 +205,7 @@ impl<N: N0de> SimulationBuilder<N> {
         .try_collect()
         .await?;
 
-        let sim_client = if let Ok(addr) = std::env::var("N0DES_SIM_SERVER") {
-            let addr: SocketAddr = addr.parse()?;
-            println!("sending simulation metrics to {addr}");
-            let client = SimClient::new_quinn_insecure(addr)?;
-            let session = client.session(simulation_name.to_string());
-            Some(session)
-        } else {
-            None
-        };
+        let sim_client = client_from_env()?.map(|client| client.session(&simulation_name));
 
         Ok(Simulation {
             name: simulation_name.to_string(),
@@ -249,6 +240,21 @@ impl<N: N0de> SimNode<N> {
     }
 }
 
+fn client_from_env() -> Result<Option<SimClient>> {
+    static CLIENT: OnceLock<Result<SimClient>> = OnceLock::new();
+
+    if let Ok(addr) = std::env::var("N0DES_SIM_SERVER") {
+        let client = CLIENT
+            .get_or_init(|| SimClient::from_addr_str(&addr))
+            .as_ref()
+            .map_err(|err| anyhow::anyhow!("failed to init sim client: {err:#}"))?
+            .clone();
+        Ok(Some(client))
+    } else {
+        Ok(None)
+    }
+}
+
 #[doc(hidden)]
 pub async fn run_sim_fn<F, Fut, N, E>(name: &str, sim_fn: F) -> anyhow::Result<()>
 where
@@ -259,6 +265,7 @@ where
 {
     println!("running simulation: {name}");
     let builder = sim_fn().await.map_err(|err| {
+        // Not sure why, but anyhow::Error::from doesn't work here.
         let err: anyhow::Error = err.into();
         err
     })?;

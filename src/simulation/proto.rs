@@ -56,6 +56,12 @@ pub struct SimClient {
 }
 
 impl SimClient {
+    pub fn from_addr_str(addr: &str) -> Result<Self> {
+        let addr: SocketAddr = addr.parse()?;
+        let client = SimClient::new_quinn_insecure(addr)?;
+        Ok(client)
+    }
+
     pub fn new_quinn_insecure(remote: SocketAddr) -> Result<Self> {
         let addr_localhost = "127.0.0.1:0".parse().unwrap();
         let endpoint = make_insecure_client_endpoint(addr_localhost)?;
@@ -80,10 +86,10 @@ impl SimClient {
         Self { client, session_id }
     }
 
-    pub(crate) fn session(&self, simulation_name: String) -> SimSession {
+    pub(crate) fn session(&self, simulation_name: &str) -> SimSession {
         SimSession {
             client: self.clone(),
-            simulation_name,
+            simulation_name: simulation_name.to_string(),
         }
     }
 }
