@@ -1638,8 +1638,7 @@ dependencies = [
 [[package]]
 name = "iroh-ping"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de531c839b4cf1a414b5c35bf32233a1de06a0935d0fe533448c745d9e784a25"
+source = "git+https://github.com/Frando/iroh-ping?branch=Frando%2Fdont-close-endpoint#7d668018844a0d1bdc30f1b80e9a9f682e3cbd0e"
 dependencies = [
  "anyhow",
  "iroh",

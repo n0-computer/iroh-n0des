@@ -33,7 +33,7 @@ uuid = { version = "1.17", features = ["v4", "serde"] }
 time = { version = "0.3.41", features = ["serde", "serde-well-known"] }
 
 [dev-dependencies]
-iroh-ping = "0.2.0"
+iroh-ping = { git = "https://github.com/Frando/iroh-ping", branch = "Frando/dont-close-endpoint" }
 
 [workspace]
 members = ["iroh-n0des-macro"]

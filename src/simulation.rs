@@ -4,11 +4,13 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     sync::{Arc, RwLock},
+    time::Duration,
 };
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use iroh::{Endpoint, NodeAddr, NodeId, Watcher};
 use iroh_metrics::{encoding::Encoder, Registry};
+use time::OffsetDateTime as DateTime;
 
 use n0_future::{FuturesUnordered, TryStreamExt};
 use proto::{SimClient, SimSession};
@@ -75,6 +77,15 @@ where
     type Fut = Out;
 }
 
+pub struct RoundOutcome {
+    round: u64,
+    node_id: NodeId,
+    node_index: usize,
+    start_time: DateTime,
+    end_time: DateTime,
+    duration: Duration,
+}
+
 impl<N: N0de> Simulation<N> {
     pub fn builder<F>(round: F) -> SimulationBuilder<N>
     where
@@ -98,7 +109,6 @@ impl<N: N0de> Simulation<N> {
             round: self.round,
         }
     }
-
     pub async fn run(&mut self) -> Result<()> {
         while self.round < self.max_rounds {
             self.run_round().await?;
@@ -109,17 +119,34 @@ impl<N: N0de> Simulation<N> {
 
     async fn run_round(&mut self) -> Result<()> {
         println!("Round {}", self.round);
-        for (i, n) in self.nodes.iter().enumerate() {
-            let ctx = self.context(i);
-            (self.round_fn)(&ctx, &n.node).await?;
-        }
+        let futures = self.nodes.iter().enumerate().map(|(i, node)| {
+            let this = &self;
+            let start_time = DateTime::now_utc();
+            async move {
+                let ctx = this.context(i);
+                let start = n0_future::time::Instant::now();
+                let round = ctx.round;
+                (this.round_fn)(&ctx, &node.node)
+                    .await
+                    .with_context(|| "Node {i} failed in round {round}")?;
+                let end_time = DateTime::now_utc();
+                anyhow::Ok(RoundOutcome {
+                    node_index: i,
+                    duration: start.elapsed(),
+                    start_time,
+                    end_time,
+                    round,
+                    node_id: ctx.self_addr().node_id,
+                })
+            }
+        });
+        let res: Vec<_> = n0_future::FuturesOrdered::from_iter(futures)
+            .try_collect()
+            .await?;
 
         if let Some(ref client) = self.sim_client {
-            let ctx = self.context(0);
-            for (i, n) in self.nodes.iter_mut().enumerate() {
-                let mut ctx = ctx.clone();
-                ctx.node_index = i;
-                client.put_metrics(&ctx, n).await?;
+            for (outcome, node) in res.into_iter().zip(self.nodes.iter_mut()) {
+                client.put_round(outcome, &mut node.encoder).await?;
             }
         }
 
@@ -146,6 +173,13 @@ impl<N: N0de> SimulationBuilder<N> {
     pub fn max_rounds(self, count: u64) -> Self {
         Self {
             max_rounds: count,
+            ..self
+        }
+    }
+
+    pub fn node_count(self, count: u32) -> Self {
+        Self {
+            nodes: count,
             ..self
         }
     }
@@ -246,12 +280,12 @@ mod tests {
     use super::*;
     use iroh_ping::{Ping, ALPN as PingALPN};
 
-    struct ExampleN0de {
+    struct PingNode {
         ping: Ping,
         router: Router,
     }
 
-    impl N0de for ExampleN0de {
+    impl N0de for PingNode {
         async fn spawn(ep: Endpoint, metrics: &mut Registry) -> Result<Self> {
             let ping = Ping::new();
             metrics.register(ping.metrics().clone());
@@ -264,13 +298,14 @@ mod tests {
         }
 
         async fn shutdown(&mut self) -> Result<()> {
+            self.router.shutdown().await?;
             Ok(())
         }
     }
 
-    #[tokio::test]
-    async fn test_simulation() {
-        async fn tick(ctx: &Context, node: &ExampleN0de) -> Result<bool> {
+    #[crate::sim]
+    async fn test_simulation() -> Result<SimulationBuilder<PingNode>> {
+        async fn tick(ctx: &Context, node: &PingNode) -> Result<bool> {
             let me = node.router.endpoint().node_id();
             let other_nodes = ctx.all_other_nodes(me);
             let ping = node.ping.clone();
@@ -279,30 +314,23 @@ mod tests {
 
             if node_index % 2 == 0 {
                 for other in other_nodes.iter() {
-                    println!("Sending message:\n\tfrom: {me}\n\t to:   {}", other.node_id);
+                    println!("Sending message:\n\tfrom: {me}\n\tto:  {}", other.node_id);
                     ping.ping(&endpoint, (other.clone()).into()).await?;
                 }
             }
             Ok(true)
         }
 
-        fn check(ctx: &Context, node: &ExampleN0de) -> Result<()> {
+        fn check(ctx: &Context, node: &PingNode) -> Result<()> {
             let metrics = node.ping.metrics();
             let node_count = ctx.addrs.len() as u64;
             match ctx.node_index % 2 {
-                0 => assert_eq!(metrics.pings_sent.get(), node_count / 2),
-                _ => assert_eq!(metrics.pings_recv.get(), node_count / 2),
+                0 => assert_eq!(metrics.pings_sent.get(), (node_count / 2) * (ctx.round + 1)),
+                _ => assert_eq!(metrics.pings_recv.get(), (node_count / 2) * (ctx.round + 1)),
             }
             Ok(())
         }
 
-        let mut sim: Simulation<ExampleN0de> = Simulation::builder(tick)
-            .max_rounds(1) // currently stuck on one tick, because more ends with an "endpoint closing" error
-            .check(check)
-            .build("test_simulation")
-            .await
-            .unwrap();
-
-        sim.run().await.unwrap();
+        Ok(Simulation::builder(tick).max_rounds(2).check(check))
     }
 }

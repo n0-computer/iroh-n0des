@@ -2,15 +2,14 @@ use std::net::SocketAddr;
 
 use anyhow::Result;
 use iroh::{Endpoint, NodeAddr, NodeId};
+use iroh_metrics::encoding::Encoder;
 use irpc::{channel::oneshot, rpc_requests, util::make_insecure_client_endpoint, Service};
 use irpc_iroh::IrohRemoteConnection;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime as DateTime;
 use uuid::Uuid;
 
-use crate::N0de;
-
-use super::{Context, SimNode};
+use super::RoundOutcome;
 
 pub const ALPN: &[u8] = b"/iroh/n0des-sim/1";
 
@@ -40,9 +39,13 @@ pub struct PutMetrics {
     pub session_id: Uuid,
     pub simulation_name: String,
     pub node_id: NodeId,
+    pub node_index: usize,
     pub round: u64,
     #[serde(with = "time::serde::rfc3339")]
-    pub timestamp: DateTime,
+    pub end_time: DateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub start_time: DateTime,
+    pub duration_micros: u64,
     pub metrics: iroh_metrics::encoding::Update,
 }
 
@@ -92,21 +95,23 @@ pub(crate) struct SimSession {
 }
 
 impl SimSession {
-    pub(crate) async fn put_metrics<N: N0de>(
+    pub(crate) async fn put_round(
         &self,
-        context: &Context,
-        node: &mut SimNode<N>,
+        outcome: RoundOutcome,
+        metrics_encoder: &mut Encoder,
     ) -> Result<()> {
-        let timestamp = DateTime::now_utc();
-        let update = node.encoder.export();
+        let update = metrics_encoder.export();
         self.client
             .client
             .rpc(PutMetrics {
                 session_id: self.client.session_id.clone(),
                 simulation_name: self.simulation_name.clone(),
-                node_id: node.endpoint.node_id(),
-                round: context.round,
-                timestamp,
+                node_id: outcome.node_id,
+                node_index: outcome.node_index,
+                round: outcome.round,
+                start_time: outcome.start_time,
+                end_time: outcome.end_time,
+                duration_micros: outcome.duration.as_micros() as u64,
                 metrics: update,
             })
             .await??;
