@@ -31,6 +31,7 @@ tokio = "1.45"
 tracing = "0.1.41"
 uuid = { version = "1.17", features = ["v4", "serde"] }
 time = { version = "0.3.41", features = ["serde", "serde-well-known"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt", "json"] }
 
 [dev-dependencies]
 iroh-ping = { git = "https://github.com/Frando/iroh-ping", branch = "Frando/dont-close-endpoint" }

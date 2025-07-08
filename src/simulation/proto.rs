@@ -31,7 +31,30 @@ pub enum RemoteError {
 #[allow(clippy::large_enum_variant)]
 pub enum SimProtocol {
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    StartSim(StartSim),
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     PutMetrics(PutMetrics),
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    EndSim(EndSim),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StartSim {
+    pub session_id: Uuid,
+    pub simulation_name: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub start_time: DateTime,
+    pub node_count: u64,
+    pub round_count: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EndSim {
+    pub session_id: Uuid,
+    pub simulation_name: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub end_time: DateTime,
+    pub result: Result<(), String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -47,6 +70,7 @@ pub struct PutMetrics {
     pub start_time: DateTime,
     pub duration_micros: u64,
     pub metrics: iroh_metrics::encoding::Update,
+    pub logs: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,11 +110,26 @@ impl SimClient {
         Self { client, session_id }
     }
 
-    pub(crate) fn session(&self, simulation_name: &str) -> SimSession {
-        SimSession {
+    pub(crate) async fn session(
+        &self,
+        simulation_name: &str,
+        node_count: u64,
+        round_count: u64,
+    ) -> Result<SimSession> {
+        let start_time = DateTime::now_utc();
+        self.client
+            .rpc(StartSim {
+                session_id: self.session_id,
+                simulation_name: simulation_name.to_string(),
+                start_time,
+                node_count,
+                round_count,
+            })
+            .await??;
+        Ok(SimSession {
             client: self.clone(),
             simulation_name: simulation_name.to_string(),
-        }
+        })
     }
 }
 
@@ -105,6 +144,7 @@ impl SimSession {
         &self,
         outcome: RoundOutcome,
         metrics_encoder: &mut Encoder,
+        logs: Option<String>,
     ) -> Result<()> {
         let update = metrics_encoder.export();
         self.client
@@ -119,6 +159,21 @@ impl SimSession {
                 end_time: outcome.end_time,
                 duration_micros: outcome.duration.as_micros() as u64,
                 metrics: update,
+                logs,
+            })
+            .await??;
+        Ok(())
+    }
+
+    pub(crate) async fn finalize(&self, result: Result<(), String>) -> Result<()> {
+        let end_time = DateTime::now_utc();
+        self.client
+            .client
+            .rpc(EndSim {
+                session_id: self.client.session_id.clone(),
+                simulation_name: self.simulation_name.clone(),
+                end_time,
+                result,
             })
             .await??;
         Ok(())

@@ -11,12 +11,16 @@ use iroh::{Endpoint, NodeAddr, NodeId, Watcher};
 use iroh_metrics::{encoding::Encoder, Registry};
 use time::OffsetDateTime as DateTime;
 
+use ::tracing::Span;
 use n0_future::{FuturesUnordered, TryStreamExt};
 use proto::{SimClient, SimSession};
+use tracing::{error_span, Instrument};
 
+use self::trace::clear_bucket;
 use crate::n0des::N0de;
 
 pub mod proto;
+mod trace;
 
 /// Simulation context passed to each node
 #[derive(Debug, Clone)]
@@ -109,6 +113,15 @@ impl<N: N0de> Simulation<N> {
         }
     }
     pub async fn run(&mut self) -> Result<()> {
+        let res = self.run_inner().await;
+        if let Some(ref client) = self.sim_client {
+            let rpc_res = res.as_ref().map(|_| ()).map_err(|e| e.to_string());
+            client.finalize(rpc_res).await?;
+        }
+        res
+    }
+
+    async fn run_inner(&mut self) -> Result<()> {
         while self.round < self.max_rounds {
             self.run_round().await?;
             self.round += 1;
@@ -121,6 +134,7 @@ impl<N: N0de> Simulation<N> {
         let futures = self.nodes.iter().enumerate().map(|(i, node)| {
             let this = &self;
             let start_time = DateTime::now_utc();
+            let span = node.span.clone();
             async move {
                 let ctx = this.context(i);
                 let start = n0_future::time::Instant::now();
@@ -138,6 +152,7 @@ impl<N: N0de> Simulation<N> {
                     node_id: ctx.self_addr().node_id,
                 })
             }
+            .instrument(span)
         });
         let res: Vec<_> = n0_future::FuturesOrdered::from_iter(futures)
             .try_collect()
@@ -145,15 +160,18 @@ impl<N: N0de> Simulation<N> {
 
         if let Some(ref client) = self.sim_client {
             for (outcome, node) in res.into_iter().zip(self.nodes.iter_mut()) {
-                client.put_round(outcome, &mut node.encoder).await?;
+                let logs = clear_bucket(outcome.node_index);
+                client.put_round(outcome, &mut node.encoder, logs).await?;
             }
         }
 
         println!("Round {} completed", self.round);
         if let Some(check) = &self.check_fn {
-            for (i, n) in self.nodes.iter().enumerate() {
+            for (i, node) in self.nodes.iter().enumerate() {
+                let span = node.span.clone();
+                let _guard = span.enter();
                 let ctx = self.context(i);
-                (check)(&ctx, &n.node)?;
+                (check)(&ctx, &node.node)?;
             }
         }
         Ok(())
@@ -191,8 +209,19 @@ impl<N: N0de> SimulationBuilder<N> {
     }
 
     pub async fn build(self, simulation_name: &str) -> Result<Simulation<N>> {
+        let sim_client = if let Some(client) = client_from_env()? {
+            let session = client
+                .session(simulation_name, self.nodes as u64, self.max_rounds)
+                .await?;
+            Some(session)
+        } else {
+            None
+        };
+
         let nodes: Vec<_> = FuturesUnordered::from_iter(
-            (0..self.nodes).into_iter().map(|_i| SimNode::<N>::spawn()),
+            (0usize..self.nodes as usize)
+                .into_iter()
+                .map(|i| SimNode::<N>::spawn(i)),
         )
         .try_collect()
         .await?;
@@ -204,8 +233,6 @@ impl<N: N0de> SimulationBuilder<N> {
         )
         .try_collect()
         .await?;
-
-        let sim_client = client_from_env()?.map(|client| client.session(&simulation_name));
 
         Ok(Simulation {
             name: simulation_name.to_string(),
@@ -224,18 +251,28 @@ pub(crate) struct SimNode<N: N0de> {
     node: N,
     endpoint: Endpoint,
     encoder: Encoder,
+    span: Span,
 }
 
 impl<N: N0de> SimNode<N> {
-    async fn spawn() -> Result<Self> {
-        let mut registry = Registry::default();
-        let endpoint = Endpoint::builder().bind().await?;
-        registry.register_all(endpoint.metrics());
-        let node = N::spawn(endpoint.clone(), &mut registry).await?;
+    async fn spawn(idx: usize) -> Result<Self> {
+        let span = error_span!("sim-node", idx, round = tracing::field::Empty);
+        let (node, endpoint, registry) = tokio::task::spawn(
+            async move {
+                let mut registry = Registry::default();
+                let endpoint = Endpoint::builder().bind().await?;
+                registry.register_all(endpoint.metrics());
+                let node = N::spawn(endpoint.clone(), &mut registry).await?;
+                anyhow::Ok((node, endpoint, registry))
+            }
+            .instrument(span.clone()),
+        )
+        .await??;
         Ok(Self {
             node,
             endpoint,
             encoder: Encoder::new(Arc::new(RwLock::new(registry))),
+            span,
         })
     }
 }
@@ -263,6 +300,7 @@ where
     N: N0de,
     E: Into<anyhow::Error>,
 {
+    self::trace::try_init_global_subscriber();
     println!("running simulation: {name}");
     let builder = sim_fn().await.map_err(|err| {
         // Not sure why, but anyhow::Error::from doesn't work here.
@@ -321,7 +359,7 @@ mod tests {
 
             if node_index % 2 == 0 {
                 for other in other_nodes.iter() {
-                    println!("Sending message:\n\tfrom: {me}\n\tto:  {}", other.node_id);
+                    tracing::info!("Sending message:\n\tfrom: {me}\n\tto:  {}", other.node_id);
                     ping.ping(&endpoint, (other.clone()).into()).await?;
                 }
             }
@@ -338,6 +376,6 @@ mod tests {
             Ok(())
         }
 
-        Ok(Simulation::builder(tick).max_rounds(2).check(check))
+        Ok(Simulation::builder(tick).max_rounds(3).check(check))
     }
 }
