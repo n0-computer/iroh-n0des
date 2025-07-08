@@ -64,7 +64,7 @@ pub(crate) fn try_init_global_subscriber() {
         let directive = std::env::var("SIM_LOG").unwrap_or_else(|_| default_directive.to_string());
         let filter = EnvFilter::new(directive);
         tracing_subscriber::fmt::layer()
-            // .json()
+            .json()
             .with_writer(bucket_writer)
             .with_filter(filter)
     };
