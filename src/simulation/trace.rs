@@ -60,7 +60,7 @@ pub(crate) fn try_init_global_subscriber() {
     let buckets = get_buckets();
     let bucket_writer = BucketWriter { buckets };
     let json_layer = {
-        let default_directive = format!("{}=debug,iroh=debug", env!("CARGO_CRATE_NAME"));
+        let default_directive = "debug".to_string();
         let directive = std::env::var("SIM_LOG").unwrap_or_else(|_| default_directive.to_string());
         let filter = EnvFilter::new(directive);
         tracing_subscriber::fmt::layer()
