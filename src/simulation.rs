@@ -42,9 +42,16 @@ impl Context {
         other_nodes
     }
 
-    #[allow(unused)]
-    fn self_addr(&self) -> &NodeAddr {
+    pub fn addr(&self, idx: usize) -> Result<NodeAddr> {
+        self.addrs.get(idx).cloned().context("node not found")
+    }
+
+    pub fn self_addr(&self) -> &NodeAddr {
         &self.addrs[self.node_index]
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.addrs.len()
     }
 }
 
@@ -60,14 +67,17 @@ pub struct Simulation<N: N0de> {
     sim_client: Option<SimSession>,
 }
 
-type BoxedRoundFn<N> = Box<
-    dyn for<'a> Fn(&'a Context, &'a N) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>>,
+type BoxedRoundFn<N> = Arc<
+    dyn for<'a> Fn(
+        &'a Context,
+        &'a mut N,
+    ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>>,
 >;
 
 type BoxedCheckFn<N> = Box<dyn Fn(&Context, &N) -> Result<()>>;
 
 pub trait AsyncCallback<'a, N: 'a, T: 'a>:
-    'static + Send + Fn(&'a Context, &'a N) -> Self::Fut
+    'static + Send + Fn(&'a Context, &'a mut N) -> Self::Fut
 {
     type Fut: Future<Output = Result<T>> + Send;
 }
@@ -75,7 +85,7 @@ pub trait AsyncCallback<'a, N: 'a, T: 'a>:
 impl<'a, N: 'a, T: 'a, Out, F> AsyncCallback<'a, N, T> for F
 where
     Out: Send + Future<Output = Result<T>>,
-    F: 'static + Send + Fn(&'a Context, &'a N) -> Out,
+    F: 'static + Send + Fn(&'a Context, &'a mut N) -> Out,
 {
     type Fut = Out;
 }
@@ -95,7 +105,7 @@ impl<N: N0de> Simulation<N> {
         F: for<'a> AsyncCallback<'a, N, bool>,
     {
         let round_fn: BoxedRoundFn<N> =
-            Box::new(move |context: &Context, node: &N| Box::pin(round(context, node)));
+            Arc::new(move |context: &Context, node: &mut N| Box::pin(round(context, node)));
         SimulationBuilder::<N> {
             max_rounds: 100,
             nodes: 2,
@@ -131,15 +141,20 @@ impl<N: N0de> Simulation<N> {
 
     async fn run_round(&mut self) -> Result<()> {
         println!("Round {}", self.round);
-        let futures = self.nodes.iter().enumerate().map(|(i, node)| {
-            let this = &self;
+        let ctx = self.context(0);
+        let round_fn = self.round_fn.clone();
+        let futures = self.nodes.iter_mut().enumerate().map(|(i, node)| {
             let start_time = DateTime::now_utc();
             let span = node.span.clone();
+            let ctx = ctx.clone();
+            let round_fn = round_fn.clone();
             async move {
-                let ctx = this.context(i);
+                let mut ctx = ctx.clone();
+                ctx.node_index = i;
+                // let ctx = this.context(i);
                 let start = n0_future::time::Instant::now();
                 let round = ctx.round;
-                (this.round_fn)(&ctx, &node.node)
+                (round_fn)(&ctx, &mut node.node)
                     .await
                     .with_context(|| "Node {i} failed in round {round}")?;
                 let end_time = DateTime::now_utc();
@@ -350,7 +365,7 @@ mod tests {
 
     #[crate::sim]
     async fn test_simulation() -> Result<SimulationBuilder<PingNode>> {
-        async fn tick(ctx: &Context, node: &PingNode) -> Result<bool> {
+        async fn tick(ctx: &Context, node: &mut PingNode) -> Result<bool> {
             let me = node.router.endpoint().node_id();
             let other_nodes = ctx.all_other_nodes(me);
             let ping = node.ping.clone();

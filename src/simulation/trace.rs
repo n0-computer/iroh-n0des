@@ -47,20 +47,22 @@ pub type BucketsGuard<'a> = MutexGuard<'a, HashMap<BucketId, Vec<u8>>>;
 
 pub(crate) fn try_init_global_subscriber() {
     let print_layer = {
-        let env_filter = format!("{}=trace,iroh=info", env!("CARGO_CRATE_NAME"));
-        let print_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| env_filter.to_string());
-        let print_filter = EnvFilter::new(print_filter);
+        let default_directive = format!("{}=debug,iroh=info", env!("CARGO_CRATE_NAME"));
+        let directive = std::env::var("RUST_LOG").unwrap_or_else(|_| default_directive.to_string());
+        let filter = EnvFilter::new(directive);
         tracing_subscriber::fmt::layer()
             .with_writer(|| TestWriter)
             .event_format(tracing_subscriber::fmt::format().with_line_number(true))
             .with_level(true)
-            .with_filter(print_filter)
+            .with_filter(filter)
     };
 
     let buckets = get_buckets();
     let bucket_writer = BucketWriter { buckets };
     let json_layer = {
-        let filter = EnvFilter::new("debug");
+        let default_directive = format!("{}=debug,iroh=debug", env!("CARGO_CRATE_NAME"));
+        let directive = std::env::var("SIM_LOG").unwrap_or_else(|_| default_directive.to_string());
+        let filter = EnvFilter::new(directive);
         tracing_subscriber::fmt::layer()
             // .json()
             .with_writer(bucket_writer)
