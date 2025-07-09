@@ -9,14 +9,12 @@ use std::{
 use anyhow::{Context as _, Result};
 use iroh::{Endpoint, NodeAddr, NodeId, Watcher};
 use iroh_metrics::{encoding::Encoder, Registry};
-use time::OffsetDateTime as DateTime;
-
-use ::tracing::Span;
 use n0_future::{FuturesUnordered, TryStreamExt};
-use proto::{SimClient, SimSession};
-use tracing::{error_span, Instrument};
+use proto::{CheckpointId, NodeInfo, NodeStats, SimClient, SimulationInfo, TraceClient, TraceKind};
+use tokio::sync::Semaphore;
+use trace::submit_logs;
+use tracing::{error_span, Instrument, Span};
 
-use self::trace::clear_bucket;
 use crate::n0des::N0de;
 
 pub mod proto;
@@ -64,7 +62,7 @@ pub struct Simulation<N: N0de> {
     nodes: Vec<SimNode<N>>,
     addrs: Arc<Vec<NodeAddr>>,
     round: u64,
-    sim_client: Option<SimSession>,
+    trace_client: Option<TraceClient>,
 }
 
 type BoxedRoundFn<N> = Arc<
@@ -91,12 +89,17 @@ where
 }
 
 pub struct RoundOutcome {
-    round: u64,
     node_id: NodeId,
-    node_index: usize,
-    start_time: DateTime,
-    end_time: DateTime,
     duration: Duration,
+}
+
+impl From<RoundOutcome> for NodeStats {
+    fn from(value: RoundOutcome) -> Self {
+        NodeStats {
+            node_id: value.node_id,
+            round_duration_ms: value.duration.as_millis() as u64,
+        }
+    }
 }
 
 impl<N: N0de> Simulation<N> {
@@ -124,17 +127,50 @@ impl<N: N0de> Simulation<N> {
     }
     pub async fn run(&mut self) -> Result<()> {
         let res = self.run_inner().await;
-        if let Some(ref client) = self.sim_client {
+        if let Some(ref client) = self.trace_client {
             let rpc_res = res.as_ref().map(|_| ()).map_err(|e| e.to_string());
-            client.finalize(rpc_res).await?;
+            client.close(rpc_res).await?;
         }
         res
     }
 
     async fn run_inner(&mut self) -> Result<()> {
+        let stats = self
+            .nodes
+            .iter()
+            .map(|n| NodeStats {
+                node_id: n.endpoint.node_id(),
+                round_duration_ms: n.spawn_time.as_millis() as u64,
+            })
+            .collect();
+        self.submit(0, "spawned".to_string(), stats).await?;
+
         while self.round < self.max_rounds {
             self.run_round().await?;
             self.round += 1;
+        }
+        Ok(())
+    }
+
+    async fn submit(
+        &mut self,
+        checkpoint_id: CheckpointId,
+        checkpoint_label: String,
+        checkpoint_stats: Vec<NodeStats>,
+    ) -> Result<()> {
+        if let Some(ref client) = self.trace_client {
+            client
+                .put_checkpoint(checkpoint_id, Some(checkpoint_label), checkpoint_stats)
+                .await?;
+
+            submit_logs(client).await?;
+
+            for node in self.nodes.iter_mut() {
+                let metrics = node.encoder.export();
+                client
+                    .put_metrics(node.node_id(), Some(checkpoint_id), metrics)
+                    .await?;
+            }
         }
         Ok(())
     }
@@ -144,26 +180,18 @@ impl<N: N0de> Simulation<N> {
         let ctx = self.context(0);
         let round_fn = self.round_fn.clone();
         let futures = self.nodes.iter_mut().enumerate().map(|(i, node)| {
-            let start_time = DateTime::now_utc();
             let span = node.span.clone();
             let ctx = ctx.clone();
             let round_fn = round_fn.clone();
             async move {
                 let mut ctx = ctx.clone();
                 ctx.node_index = i;
-                // let ctx = this.context(i);
                 let start = n0_future::time::Instant::now();
-                let round = ctx.round;
                 (round_fn)(&ctx, &mut node.node)
                     .await
                     .with_context(|| "Node {i} failed in round {round}")?;
-                let end_time = DateTime::now_utc();
                 anyhow::Ok(RoundOutcome {
-                    node_index: i,
                     duration: start.elapsed(),
-                    start_time,
-                    end_time,
-                    round,
                     node_id: ctx.self_addr().node_id,
                 })
             }
@@ -173,12 +201,14 @@ impl<N: N0de> Simulation<N> {
             .try_collect()
             .await?;
 
-        if let Some(ref client) = self.sim_client {
-            for (outcome, node) in res.into_iter().zip(self.nodes.iter_mut()) {
-                let logs = clear_bucket(outcome.node_index);
-                client.put_round(outcome, &mut node.encoder, logs).await?;
-            }
-        }
+        let stats = res.into_iter().map(NodeStats::from).collect();
+
+        self.submit(
+            self.round + 1,
+            format!("round {} end", self.round + 1),
+            stats,
+        )
+        .await?;
 
         println!("Round {} completed", self.round);
         if let Some(check) = &self.check_fn {
@@ -224,15 +254,6 @@ impl<N: N0de> SimulationBuilder<N> {
     }
 
     pub async fn build(self, simulation_name: &str) -> Result<Simulation<N>> {
-        let sim_client = if let Some(client) = client_from_env()? {
-            let session = client
-                .session(simulation_name, self.nodes as u64, self.max_rounds)
-                .await?;
-            Some(session)
-        } else {
-            None
-        };
-
         let nodes: Vec<_> = FuturesUnordered::from_iter(
             (0usize..self.nodes as usize)
                 .into_iter()
@@ -240,6 +261,28 @@ impl<N: N0de> SimulationBuilder<N> {
         )
         .try_collect()
         .await?;
+
+        let trace_client = if let Some(client) = client_from_env()? {
+            let node_info = nodes
+                .iter()
+                .enumerate()
+                .map(|(i, node)| NodeInfo {
+                    node_id: node.endpoint.node_id(),
+                    node_index: i as u64,
+                })
+                .collect();
+            let kind = TraceKind::Simulation(SimulationInfo {
+                nodes: node_info,
+                expected_rounds: self.max_rounds,
+            });
+            let trace_client = client
+                .start_trace(simulation_name, kind)
+                .await
+                .context("failed to connect to sim server")?;
+            Some(trace_client)
+        } else {
+            None
+        };
 
         let addrs: Vec<_> = FuturesUnordered::from_iter(
             nodes
@@ -256,7 +299,7 @@ impl<N: N0de> SimulationBuilder<N> {
             check_fn: self.check_fn,
             nodes,
             addrs: Arc::new(addrs),
-            sim_client,
+            trace_client,
             round: 0,
         })
     }
@@ -267,29 +310,38 @@ pub(crate) struct SimNode<N: N0de> {
     endpoint: Endpoint,
     encoder: Encoder,
     span: Span,
+    spawn_time: Duration,
 }
 
 impl<N: N0de> SimNode<N> {
     async fn spawn(idx: usize) -> Result<Self> {
         let span = error_span!("sim-node", idx, round = tracing::field::Empty);
-        let (node, endpoint, registry) = tokio::task::spawn(
-            async move {
-                let mut registry = Registry::default();
-                let endpoint = Endpoint::builder().bind().await?;
-                registry.register_all(endpoint.metrics());
-                let node = N::spawn(endpoint.clone(), &mut registry).await?;
-                anyhow::Ok((node, endpoint, registry))
-            }
-            .instrument(span.clone()),
-        )
-        .await??;
+        let start = n0_future::time::Instant::now();
+        let (node, endpoint, registry) = async move {
+            let mut registry = Registry::default();
+            let endpoint = Endpoint::builder().bind().await?;
+            registry.register_all(endpoint.metrics());
+            let node = N::spawn(endpoint.clone(), &mut registry).await?;
+            anyhow::Ok((node, endpoint, registry))
+        }
+        .instrument(span.clone())
+        .await?;
         Ok(Self {
             node,
             endpoint,
             encoder: Encoder::new(Arc::new(RwLock::new(registry))),
             span,
+            spawn_time: start.elapsed(),
         })
     }
+
+    fn node_id(&self) -> NodeId {
+        self.endpoint.node_id()
+    }
+}
+
+pub fn is_sim_env() -> bool {
+    std::env::var("N0DES_SIM_SERVER").is_ok()
 }
 
 fn client_from_env() -> Result<Option<SimClient>> {
@@ -301,11 +353,14 @@ fn client_from_env() -> Result<Option<SimClient>> {
             .as_ref()
             .map_err(|err| anyhow::anyhow!("failed to init sim client: {err:#}"))?
             .clone();
+        tracing::info!("Initialized trace client connection to {addr}");
         Ok(Some(client))
     } else {
         Ok(None)
     }
 }
+
+static PERMIT: Semaphore = Semaphore::const_new(1);
 
 #[doc(hidden)]
 pub async fn run_sim_fn<F, Fut, N, E>(name: &str, sim_fn: F) -> anyhow::Result<()>
@@ -315,20 +370,36 @@ where
     N: N0de,
     E: Into<anyhow::Error>,
 {
-    self::trace::try_init_global_subscriber();
+    // ensure simulations run sequentially so that we can extract logs properly.
+    let permit = PERMIT.acquire().await.unwrap();
+
+    if is_sim_env() {
+        tracing::debug!("running in simulation env: ensure tracing subscriber is setup");
+        self::trace::try_init_global_subscriber();
+        self::trace::global_writer().clear();
+    }
+
     println!("running simulation: {name}");
-    let builder = sim_fn().await.map_err(|err| {
-        // Not sure why, but anyhow::Error::from doesn't work here.
-        let err: anyhow::Error = err.into();
-        err
-    })?;
-    let mut sim = builder.build(name).await?;
+    let builder = sim_fn()
+        .await
+        .map_err(|err| {
+            // Not sure why, but anyhow::Error::from doesn't work here.
+            let err: anyhow::Error = err.into();
+            err
+        })
+        .with_context(|| format!("simulation builder function `{name}` failed"))?;
+    let mut sim = builder
+        .build(name)
+        .await
+        .with_context(|| format!("simulation `{name}` failed to build"))?;
     let res = sim.run().await;
     match &res {
         Ok(()) => println!("simulation passed"),
         Err(err) => println!("simulation failed: {err:#}"),
     };
-    res?;
+    res.with_context(|| "simulation `{name}` failed to run")?;
+
+    drop(permit);
     Ok(())
 }
 
@@ -392,5 +463,31 @@ mod tests {
         }
 
         Ok(Simulation::builder(tick).max_rounds(3).check(check))
+    }
+
+    #[tokio::test]
+    async fn test_trace_connect() -> Result<()> {
+        let Some(client) = client_from_env()? else {
+            println!(
+                "skipping trace server connect test: no server addr provided via N0DES_SIM_SERVER"
+            );
+            return Ok(());
+        };
+        super::trace::try_init_global_subscriber();
+        let trace_client = client.start_trace("foo", TraceKind::Test {}).await?;
+        tracing::info!("hello world");
+        let span = tracing::info_span!("req", id = 1, method = "get");
+        let _guard = span.enter();
+        tracing::debug!("start");
+        let span2 = tracing::info_span!("inner");
+        let _guard2 = span2.enter();
+        tracing::debug!("inner message");
+        drop(_guard2);
+        tracing::debug!(time = 22, "end");
+        super::trace::submit_logs(&trace_client).await?;
+        tracing::info!("bazoo");
+        tracing::debug!(foo = "bar", "bazza");
+        super::trace::submit_logs(&trace_client).await?;
+        Ok(())
     }
 }

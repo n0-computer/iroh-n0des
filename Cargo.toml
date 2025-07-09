@@ -29,9 +29,10 @@ strum = { version = "0.27.1", features = ["derive"] }
 thiserror = "2.0.12"
 tokio = "1.45"
 tracing = "0.1.41"
-uuid = { version = "1.17", features = ["v4", "serde"] }
+uuid = { version = "1.17", features = ["v4", "serde", "v7"] }
 time = { version = "0.3.41", features = ["serde", "serde-well-known"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt", "json"] }
+serde_json = "1.0.140"
 
 [dev-dependencies]
 iroh-ping = { git = "https://github.com/Frando/iroh-ping", branch = "Frando/dont-close-endpoint" }

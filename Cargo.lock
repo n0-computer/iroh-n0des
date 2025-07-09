@@ -1617,6 +1617,7 @@ dependencies = [
  "rand 0.8.5",
  "rcan",
  "serde",
+ "serde_json",
  "ssh-key",
  "strum 0.27.1",
  "thiserror 2.0.12",
