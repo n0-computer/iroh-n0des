@@ -119,32 +119,33 @@ pub struct SimClient {
 
 impl SimClient {
     pub fn from_addr_str(addr: &str) -> Result<Self> {
-        let addr: SocketAddr = addr.parse()?;
-        let client = SimClient::new_quinn_insecure(addr)?;
+        let (addr, session_id) = match addr.split_once("/") {
+            None => (addr.parse()?, Uuid::now_v7()),
+            Some((addr, session_id)) => (addr.parse()?, session_id.parse()?),
+        };
+        let client = Self::new_quinn_insecure(addr, session_id)?;
         Ok(client)
     }
 
-    pub fn new_quinn_insecure(remote: SocketAddr) -> Result<Self> {
+    pub fn new_quinn_insecure(remote: SocketAddr, session_id: Uuid) -> Result<Self> {
         let addr_localhost = "127.0.0.1:0".parse().unwrap();
         let endpoint = make_insecure_client_endpoint(addr_localhost)?;
-        Ok(Self::connect_quinn(endpoint, remote))
+        Ok(Self::connect_quinn(endpoint, remote, session_id))
     }
 
-    pub fn connect_quinn(endpoint: quinn::Endpoint, remote: SocketAddr) -> Self {
+    pub fn connect_quinn(endpoint: quinn::Endpoint, remote: SocketAddr, session_id: Uuid) -> Self {
         let client = irpc::Client::quinn(endpoint, remote);
-        let session_id = Uuid::now_v7();
         Self { client, session_id }
     }
 
-    pub async fn new_iroh(remote: NodeId) -> Result<Self> {
+    pub async fn new_iroh(remote: NodeId, session_id: Uuid) -> Result<Self> {
         let endpoint = Endpoint::builder().discovery_local_network().bind().await?;
-        Ok(Self::connect_iroh(endpoint, remote))
+        Ok(Self::connect_iroh(endpoint, remote, session_id))
     }
 
-    pub fn connect_iroh(endpoint: Endpoint, remote: impl Into<NodeAddr>) -> Self {
+    pub fn connect_iroh(endpoint: Endpoint, remote: impl Into<NodeAddr>, session_id: Uuid) -> Self {
         let conn = IrohRemoteConnection::new(endpoint, remote.into(), ALPN.to_vec());
         let client = irpc::Client::boxed(conn);
-        let session_id = Uuid::new_v4();
         Self { client, session_id }
     }
 

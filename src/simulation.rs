@@ -475,6 +475,7 @@ mod tests {
         };
         super::trace::try_init_global_subscriber();
         let trace_client = client.start_trace("foo", TraceKind::Test {}).await?;
+
         tracing::info!("hello world");
         let span = tracing::info_span!("req", id = 1, method = "get");
         let _guard = span.enter();
