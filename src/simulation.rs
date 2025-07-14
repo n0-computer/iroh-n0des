@@ -255,9 +255,7 @@ impl<N: N0de> SimulationBuilder<N> {
 
     pub async fn build(self, simulation_name: &str) -> Result<Simulation<N>> {
         let nodes: Vec<_> = FuturesUnordered::from_iter(
-            (0usize..self.nodes as usize)
-                .into_iter()
-                .map(|i| SimNode::<N>::spawn(i)),
+            (0usize..self.nodes as usize).map(|i| SimNode::<N>::spawn(i)),
         )
         .try_collect()
         .await?;
@@ -407,9 +405,9 @@ where
 mod tests {
 
     use iroh::protocol::Router;
+    use iroh_ping::{Ping, ALPN as PingALPN};
 
     use super::*;
-    use iroh_ping::{Ping, ALPN as PingALPN};
 
     struct PingNode {
         ping: Ping,
@@ -446,7 +444,7 @@ mod tests {
             if node_index % 2 == 0 {
                 for other in other_nodes.iter() {
                     tracing::info!("Sending message:\n\tfrom: {me}\n\tto:  {}", other.node_id);
-                    ping.ping(&endpoint, (other.clone()).into()).await?;
+                    ping.ping(&endpoint, other.clone()).await?;
                 }
             }
             Ok(true)

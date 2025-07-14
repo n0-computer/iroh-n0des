@@ -48,7 +48,7 @@ pub(crate) fn try_init_global_subscriber() {
 
 pub(crate) fn global_writer() -> LineWriter {
     static WRITER: OnceLock<LineWriter> = OnceLock::new();
-    WRITER.get_or_init(|| Default::default()).clone()
+    WRITER.get_or_init(Default::default).clone()
 }
 
 pub(crate) async fn submit_logs(client: &TraceClient) -> anyhow::Result<()> {
