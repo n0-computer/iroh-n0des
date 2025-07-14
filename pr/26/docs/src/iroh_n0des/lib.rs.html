@@ -29,11 +29,11 @@
 <span class="comment">// This lets us use the derive metrics in the lib tests within this crate.
 </span><span class="kw">extern crate </span><span class="self">self </span><span class="kw">as </span>iroh_n0des;
 
+<span class="kw">pub use </span>iroh_metrics::Registry;
+
 <span class="kw">pub use </span><span class="self">self</span>::{
     client::{Client, ClientBuilder},
     n0des::N0de,
     protocol::ALPN,
 };
-
-<span class="kw">pub use </span>iroh_metrics::Registry;
 </code></pre></div></section></main></body></html>

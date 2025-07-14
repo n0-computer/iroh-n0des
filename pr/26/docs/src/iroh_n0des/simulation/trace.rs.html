@@ -165,7 +165,7 @@
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>global_writer() -&gt; LineWriter {
     <span class="kw">static </span>WRITER: OnceLock&lt;LineWriter&gt; = OnceLock::new();
-    WRITER.get_or_init(|| Default::default()).clone()
+    WRITER.get_or_init(Default::default).clone()
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">async fn </span>submit_logs(client: <span class="kw-2">&amp;</span>TraceClient) -&gt; anyhow::Result&lt;()&gt; {
