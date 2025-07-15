@@ -274,7 +274,20 @@
 <a href="#273" id="273">273</a>
 <a href="#274" id="274">274</a>
 <a href="#275" id="275">275</a>
-<a href="#276" id="276">276</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::net::SocketAddr;
+<a href="#276" id="276">276</a>
+<a href="#277" id="277">277</a>
+<a href="#278" id="278">278</a>
+<a href="#279" id="279">279</a>
+<a href="#280" id="280">280</a>
+<a href="#281" id="281">281</a>
+<a href="#282" id="282">282</a>
+<a href="#283" id="283">283</a>
+<a href="#284" id="284">284</a>
+<a href="#285" id="285">285</a>
+<a href="#286" id="286">286</a>
+<a href="#287" id="287">287</a>
+<a href="#288" id="288">288</a>
+<a href="#289" id="289">289</a></pre></div><pre class="rust"><code><span class="kw">use </span>std::net::SocketAddr;
 
 <span class="kw">use </span>anyhow::Result;
 <span class="kw">use </span>iroh::{Endpoint, NodeAddr, NodeId};
@@ -298,6 +311,18 @@
 </span><span class="kw">pub enum </span>RemoteError {
     <span class="attr">#[error(<span class="string">"{0}"</span>)]
     </span>Other(String),
+}
+
+<span class="kw">impl </span>RemoteError {
+    <span class="kw">pub fn </span>other(s: <span class="kw">impl </span>ToString) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::Other(s.to_string())
+    }
+}
+
+<span class="kw">impl </span>From&lt;anyhow::Error&gt; <span class="kw">for </span>RemoteError {
+    <span class="kw">fn </span>from(value: anyhow::Error) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::other(value)
+    }
 }
 
 <span class="attr">#[derive(Debug, Serialize, Deserialize)]
@@ -395,6 +420,7 @@
 
 <span class="kw">impl </span>SimClient {
     <span class="kw">pub fn </span>from_addr_str(addr: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+        <span class="macro">tracing::info!</span>(<span class="string">"initializing sim client with address {addr}"</span>);
         <span class="kw">let </span>(addr, session_id) = <span class="kw">match </span>addr.split_once(<span class="string">"/"</span>) {
             <span class="prelude-val">None </span>=&gt; (addr.parse()<span class="question-mark">?</span>, Uuid::now_v7()),
             <span class="prelude-val">Some</span>((addr, session_id)) =&gt; (addr.parse()<span class="question-mark">?</span>, session_id.parse()<span class="question-mark">?</span>),
