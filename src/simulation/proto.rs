@@ -24,6 +24,18 @@ pub enum RemoteError {
     Other(String),
 }
 
+impl RemoteError {
+    pub fn other(s: impl ToString) -> Self {
+        Self::Other(s.to_string())
+    }
+}
+
+impl From<anyhow::Error> for RemoteError {
+    fn from(value: anyhow::Error) -> Self {
+        Self::other(value)
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[rpc_requests(SimService, message = SimMessage)]
 #[allow(clippy::large_enum_variant)]
@@ -119,6 +131,7 @@ pub struct SimClient {
 
 impl SimClient {
     pub fn from_addr_str(addr: &str) -> Result<Self> {
+        tracing::info!("initializing sim client with address {addr}");
         let (addr, session_id) = match addr.split_once("/") {
             None => (addr.parse()?, Uuid::now_v7()),
             Some((addr, session_id)) => (addr.parse()?, session_id.parse()?),
