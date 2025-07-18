@@ -189,7 +189,7 @@ impl<N: N0de> Simulation<N> {
                 let start = n0_future::time::Instant::now();
                 (round_fn)(&ctx, &mut node.node)
                     .await
-                    .with_context(|| "Node {i} failed in round {round}")?;
+                    .with_context(|| format!("Node {i} failed in round {}", ctx.round))?;
                 anyhow::Ok(RoundOutcome {
                     duration: start.elapsed(),
                     node_id: ctx.self_addr().node_id,
@@ -395,7 +395,7 @@ where
         Ok(()) => println!("simulation passed"),
         Err(err) => println!("simulation failed: {err:#}"),
     };
-    res.with_context(|| "simulation `{name}` failed to run")?;
+    res.with_context(|| format!("simulation `{name}` failed to run"))?;
 
     drop(permit);
     Ok(())
