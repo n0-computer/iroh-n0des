@@ -1,0 +1,18 @@
+[package]
+name = "iroh-n0des-macro"
+version = "0.1.0"
+edition = "2021"
+authors = ["n0 team"]
+keywords = []
+categories = []
+license = "Apache-2.0/MIT"
+repository = "https://github.com/n0-computer/iroh-n0des"
+description = "Macros for iroh-n0des"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"

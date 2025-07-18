@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use iroh::{Endpoint, NodeAddr, NodeId};
 use iroh_n0des::Client;
@@ -25,13 +27,15 @@ pub async fn main() -> Result<()> {
 
     // Create iroh services client
     let mut rpc_client = Client::builder(&client_endpoint)
-        // .metrics_interval(Duration::from_secs(2))
+        .metrics_interval(Duration::from_secs(2))
         .ssh_key(&alice_ssh_key)?
         .build(remote_node_addr.clone())
         .await?;
 
     rpc_client.ping().await?;
     println!("ping OK");
+    // waiting to push some metrics
+    tokio::time::sleep(Duration::from_secs(4)).await;
     client_endpoint.close().await;
 
     Ok(())
