@@ -7,7 +7,10 @@ use irpc::{channel::oneshot, rpc_requests, util::make_insecure_client_endpoint, 
 use irpc_iroh::IrohRemoteConnection;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime as DateTime;
+use tracing::debug;
 use uuid::Uuid;
+
+use super::{ENV_TRACE_SERVER, ENV_TRACE_SESSION_ID};
 
 pub const ALPN: &[u8] = b"/iroh/n0des-sim/1";
 
@@ -22,6 +25,8 @@ pub type RemoteResult<T> = Result<T, RemoteError>;
 pub enum RemoteError {
     #[error("{0}")]
     Other(String),
+    #[error("Trace not found ({0})")]
+    TraceNotFound(Uuid),
 }
 
 impl RemoteError {
@@ -50,6 +55,29 @@ pub enum SimProtocol {
     Logs(PutLogs),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     Metrics(PutMetrics),
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    WaitCheckpoint(WaitCheckpoint),
+    #[rpc(tx=oneshot::Sender<RemoteResult<WaitStartResponse>>)]
+    WaitStart(WaitStart),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WaitCheckpoint {
+    pub trace_id: Uuid,
+    pub checkpoint_id: CheckpointId,
+    pub required_count: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WaitStart {
+    pub trace_id: Uuid,
+    pub info: NodeInfoWithAddr,
+    pub required_count: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WaitStartResponse {
+    pub infos: Vec<NodeInfoWithAddr>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -57,27 +85,45 @@ pub struct StartTrace {
     pub trace_id: Uuid,
     pub session_id: Uuid,
     pub name: String,
-    pub kind: TraceKind,
+    pub scope: ScopeInfo,
     #[serde(with = "time::serde::rfc3339")]
     pub start_time: DateTime,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum TraceKind {
-    Simulation(SimulationInfo),
-    Test {},
+pub enum ScopeInfo {
+    Integrated(Vec<NodeInfo>),
+    Isolated { node: NodeInfo, total_count: u32 },
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SimulationInfo {
-    pub nodes: Vec<NodeInfo>,
-    pub expected_rounds: u64,
+impl From<&ScopeInfo> for Scope {
+    fn from(value: &ScopeInfo) -> Self {
+        match value {
+            ScopeInfo::Integrated(_) => Scope::Integrated,
+            ScopeInfo::Isolated { node, .. } => Scope::Isolated(node.idx),
+        }
+    }
+}
+
+pub type NodeIdx = u32;
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub enum Scope {
+    Integrated,
+    Isolated(NodeIdx),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeInfo {
-    pub node_id: NodeId,
-    pub node_index: u64,
+    pub id: NodeId,
+    pub idx: u32,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NodeInfoWithAddr {
+    pub info: NodeInfo,
+    pub addr: NodeAddr,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -85,13 +131,14 @@ pub struct EndTrace {
     pub trace_id: Uuid,
     #[serde(with = "time::serde::rfc3339")]
     pub end_time: DateTime,
+    pub scope: Scope,
     pub result: Result<(), String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PutLogs {
     pub trace_id: Uuid,
-    // pub round_idx: Option<RoundIdx>,
+    pub scope: Scope,
     pub json_lines: Vec<String>,
 }
 
@@ -111,16 +158,10 @@ pub type CheckpointId = u64;
 pub struct PutCheckpoint {
     pub trace_id: Uuid,
     pub checkpoint_id: CheckpointId,
-    pub node_stats: Vec<NodeStats>,
+    pub scope: Scope,
     pub label: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub time: DateTime,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct NodeStats {
-    pub node_id: NodeId,
-    pub round_duration_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -130,14 +171,17 @@ pub struct SimClient {
 }
 
 impl SimClient {
-    pub fn from_addr_str(addr: &str) -> Result<Self> {
-        tracing::info!("initializing sim client with address {addr}");
-        let (addr, session_id) = match addr.split_once("/") {
-            None => (addr.parse()?, Uuid::now_v7()),
-            Some((addr, session_id)) => (addr.parse()?, session_id.parse()?),
-        };
-        let client = Self::new_quinn_insecure(addr, session_id)?;
-        Ok(client)
+    pub fn from_env() -> Result<Option<Self>> {
+        if let Ok(addr) = std::env::var(ENV_TRACE_SERVER) {
+            let addr: SocketAddr = addr.parse()?;
+            let session_id: Uuid = match std::env::var(ENV_TRACE_SESSION_ID) {
+                Ok(id) => id.parse()?,
+                Err(_) => Uuid::now_v7(),
+            };
+            Ok(Some(Self::new_quinn_insecure(addr, session_id)?))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn new_quinn_insecure(remote: SocketAddr, session_id: Uuid) -> Result<Self> {
@@ -162,21 +206,36 @@ impl SimClient {
         Self { client, session_id }
     }
 
-    pub(crate) async fn start_trace(&self, name: &str, kind: TraceKind) -> Result<TraceClient> {
+    #[cfg(test)]
+    pub(crate) async fn start_standalone(&self, name: &str) -> Result<TraceClient> {
+        self.start_trace(name, ScopeInfo::Integrated(Default::default()), None)
+            .await
+    }
+
+    pub(crate) async fn start_trace(
+        &self,
+        name: &str,
+        scope_info: ScopeInfo,
+        trace_id: Option<Uuid>,
+    ) -> Result<TraceClient> {
         let start_time = DateTime::now_utc();
-        let trace_id = Uuid::now_v7();
+        let trace_id = trace_id.unwrap_or_else(Uuid::now_v7);
+        let scope = Scope::from(&scope_info);
+        debug!("start trace {trace_id}");
         self.client
             .rpc(StartTrace {
                 trace_id,
                 session_id: self.session_id,
                 name: name.to_string(),
-                kind,
+                scope: scope_info,
                 start_time,
             })
             .await??;
+        debug!("start trace {trace_id}: OK");
         Ok(TraceClient {
             client: self.client.clone(),
             trace_id,
+            scope,
         })
     }
 }
@@ -185,6 +244,7 @@ impl SimClient {
 pub(crate) struct TraceClient {
     client: irpc::Client<SimMessage, SimProtocol, SimService>,
     trace_id: Uuid,
+    scope: Scope,
 }
 
 impl TraceClient {
@@ -192,14 +252,13 @@ impl TraceClient {
         &self,
         id: CheckpointId,
         label: Option<String>,
-        node_stats: Vec<NodeStats>,
     ) -> Result<()> {
         let time = DateTime::now_utc();
         self.client
             .rpc(PutCheckpoint {
                 trace_id: self.trace_id,
                 checkpoint_id: id,
-                node_stats,
+                scope: self.scope,
                 time,
                 label,
             })
@@ -229,6 +288,7 @@ impl TraceClient {
     pub(crate) async fn put_logs(&self, json_lines: Vec<String>) -> Result<()> {
         self.client
             .rpc(PutLogs {
+                scope: self.scope,
                 trace_id: self.trace_id,
                 json_lines,
             })
@@ -236,54 +296,53 @@ impl TraceClient {
         Ok(())
     }
 
-    pub(crate) async fn close(&self, result: Result<(), String>) -> Result<()> {
+    pub(crate) async fn wait_start(
+        &self,
+        info: NodeInfoWithAddr,
+        required_count: u32,
+    ) -> Result<Vec<NodeInfoWithAddr>> {
+        debug!("waiting for {required_count} nodes to confirm start...");
+        let res = self
+            .client
+            .rpc(WaitStart {
+                info,
+                required_count,
+                trace_id: self.trace_id,
+            })
+            .await??;
+        debug!("start confirmed");
+        Ok(res.infos)
+    }
+
+    pub(crate) async fn wait_checkpoint(
+        &self,
+        checkpoint_id: CheckpointId,
+        required_count: u32,
+    ) -> Result<()> {
+        debug!("waiting for {required_count} nodes to confirm checkpoint {checkpoint_id}...");
+        let res = self
+            .client
+            .rpc(WaitCheckpoint {
+                checkpoint_id,
+                required_count,
+                trace_id: self.trace_id,
+            })
+            .await;
+        res??;
+        debug!("checkpoint {checkpoint_id} confirmed");
+        Ok(())
+    }
+
+    pub(crate) async fn end_trace(&self, result: Result<(), String>) -> Result<()> {
         let end_time = DateTime::now_utc();
         self.client
             .rpc(EndTrace {
                 trace_id: self.trace_id,
+                scope: self.scope,
                 end_time,
                 result,
             })
             .await??;
         Ok(())
     }
-
-    // pub(crate) async fn put_round(
-    //     &self,
-    //     outcome: RoundOutcome,
-    //     metrics_encoder: &mut Encoder,
-    //     logs: Option<String>,
-    // ) -> Result<()> {
-    //     let update = metrics_encoder.export();
-    //     self.client
-    //         .client
-    //         .rpc(PutMetrics {
-    //             session_id: self.client.session_id.clone(),
-    //             simulation_name: self.simulation_name.clone(),
-    //             node_id: outcome.node_id,
-    //             node_index: outcome.node_index,
-    //             round: outcome.round,
-    //             start_time: outcome.start_time,
-    //             end_time: outcome.end_time,
-    //             duration_micros: outcome.duration.as_micros() as u64,
-    //             metrics: update,
-    //             logs,
-    //         })
-    //         .await??;
-    //     Ok(())
-    // }
-
-    // pub(crate) async fn finalize(&self, result: Result<(), String>) -> Result<()> {
-    //     let end_time = DateTime::now_utc();
-    //     self.client
-    //         .client
-    //         .rpc(EndSim {
-    //             session_id: self.client.session_id.clone(),
-    //             simulation_name: self.simulation_name.clone(),
-    //             end_time,
-    //             result,
-    //         })
-    //         .await??;
-    //     Ok(())
-    // }
 }

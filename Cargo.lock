@@ -604,6 +604,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.104",
+ "unicode-xid",
 ]
 
 [[package]]
