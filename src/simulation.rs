@@ -193,7 +193,7 @@ impl<N: N0de> Simulation<N> {
                         checkpoint,
                         ctx.node_index as u32,
                         Some(format!("round {checkpoint} end")),
-                        res.as_ref().map_err(|err| format!("{:#}", err)).map(|_| ()),
+                        res.as_ref().map_err(|err| format!("{err:#}")).map(|_| ()),
                     )
                     .await?;
 
@@ -600,7 +600,7 @@ mod tests {
             if ctx.node_index == 1 {
                 for other in ctx.all_other_nodes(me) {
                     node.ping
-                        .ping(&node.router.endpoint(), other.clone())
+                        .ping(node.router.endpoint(), other.clone())
                         .await?;
                 }
             }
