@@ -14,5 +14,7 @@ pub trait N0de: 'static + Send + Sync {
         Self: Sized;
 
     /// Asynchronously shut down the node
-    fn shutdown(&mut self) -> impl Future<Output = Result<()>> + Send;
+    fn shutdown(&mut self) -> impl Future<Output = Result<()>> + Send {
+        async move { Ok(()) }
+    }
 }

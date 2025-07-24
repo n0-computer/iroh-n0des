@@ -45,47 +45,84 @@ impl From<anyhow::Error> for RemoteError {
 #[rpc_requests(SimService, message = SimMessage)]
 #[allow(clippy::large_enum_variant)]
 pub enum SimProtocol {
-    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    #[rpc(tx=oneshot::Sender<RemoteResult<Option<GetSessionResponse>>>)]
+    GetSession(GetSession),
+    #[rpc(tx=oneshot::Sender<RemoteResult<Uuid>>)]
+    InitTrace(InitTrace),
+    #[rpc(tx=oneshot::Sender<RemoteResult<Uuid>>)]
     StartTrace(StartTrace),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     EndTrace(EndTrace),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     PutCheckpoint(PutCheckpoint),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
-    Logs(PutLogs),
+    PutLogs(PutLogs),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
-    Metrics(PutMetrics),
+    PutMetrics(PutMetrics),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     WaitCheckpoint(WaitCheckpoint),
     #[rpc(tx=oneshot::Sender<RemoteResult<WaitStartResponse>>)]
     WaitStart(WaitStart),
+    // #[rpc(tx=oneshot::Sender<RemoteResult<WaitStartResponse>>)]
+    // BarrierWait(Moment),
+}
+
+// #[derive(Debug, Serialize, Deserialize, Clone)]
+// pub struct GetTraceSummary(Uuid);
+
+// #[derive(Debug, Serialize, Deserialize, Clone)]
+// pub struct GetEvents(Uuid);
+
+// #[derive(Debug, Serialize, Deserialize, Clone)]
+// pub struct TraceSummary {}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GetSession {
+    pub session_id: Uuid,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct WaitCheckpoint {
+pub struct GetSessionResponse {
+    pub traces: Vec<TraceDetails>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TraceDetails {
     pub trace_id: Uuid,
-    pub checkpoint_id: CheckpointId,
-    pub required_count: u32,
+    pub info: TraceInfo,
+    pub finished: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct WaitStart {
-    pub trace_id: Uuid,
-    pub info: NodeInfoWithAddr,
-    pub required_count: u32,
+pub struct InitTrace {
+    pub session_id: Uuid,
+    pub info: TraceInfo,
+    #[serde(with = "time::serde::rfc3339")]
+    pub start_time: DateTime,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct WaitStartResponse {
-    pub infos: Vec<NodeInfoWithAddr>,
+pub struct TraceInfo {
+    pub name: String,
+    pub expected_nodes: Option<u32>,
+    pub expected_checkpoints: Option<u64>,
+}
+
+impl TraceInfo {
+    pub fn new(name: impl ToString) -> Self {
+        Self {
+            name: name.to_string(),
+            expected_nodes: None,
+            expected_checkpoints: None,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StartTrace {
-    pub trace_id: Uuid,
     pub session_id: Uuid,
     pub name: String,
-    pub scope: ScopeInfo,
+    pub scope_info: ScopeInfo,
     #[serde(with = "time::serde::rfc3339")]
     pub start_time: DateTime,
 }
@@ -93,14 +130,14 @@ pub struct StartTrace {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ScopeInfo {
     Integrated(Vec<NodeInfo>),
-    Isolated { node: NodeInfo, total_count: u32 },
+    Isolated(NodeInfo),
 }
 
 impl From<&ScopeInfo> for Scope {
     fn from(value: &ScopeInfo) -> Self {
         match value {
             ScopeInfo::Integrated(_) => Scope::Integrated,
-            ScopeInfo::Isolated { node, .. } => Scope::Isolated(node.idx),
+            ScopeInfo::Isolated(info) => Scope::Isolated(info.idx),
         }
     }
 }
@@ -114,6 +151,15 @@ pub enum Scope {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct EndTrace {
+    pub scope: Scope,
+    pub trace_id: Uuid,
+    #[serde(with = "time::serde::rfc3339")]
+    pub end_time: DateTime,
+    pub result: Result<(), String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeInfo {
     pub id: NodeId,
     pub idx: u32,
@@ -124,15 +170,6 @@ pub struct NodeInfo {
 pub struct NodeInfoWithAddr {
     pub info: NodeInfo,
     pub addr: NodeAddr,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct EndTrace {
-    pub trace_id: Uuid,
-    #[serde(with = "time::serde::rfc3339")]
-    pub end_time: DateTime,
-    pub scope: Scope,
-    pub result: Result<(), String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -158,10 +195,43 @@ pub type CheckpointId = u64;
 pub struct PutCheckpoint {
     pub trace_id: Uuid,
     pub checkpoint_id: CheckpointId,
-    pub scope: Scope,
+    pub node_idx: NodeIdx,
     pub label: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub time: DateTime,
+    pub result: Result<(), String>,
+}
+
+// #[derive(Debug, Serialize, Deserialize, Clone)]
+// pub struct BarrierWait {
+//     pub trace_id: Uuid,
+//     pub moment: Moment,
+// }
+
+// #[derive(Debug, Serialize, Deserialize, Clone)]
+// pub enum Moment {
+//     Start,
+//     Checkpoint(CheckpointId),
+//     End,
+// }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WaitCheckpoint {
+    pub trace_id: Uuid,
+    pub checkpoint_id: CheckpointId,
+    pub required_count: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WaitStart {
+    pub trace_id: Uuid,
+    pub info: NodeInfoWithAddr,
+    pub required_count: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WaitStartResponse {
+    pub infos: Vec<NodeInfoWithAddr>,
 }
 
 #[derive(Debug, Clone)]
@@ -207,27 +277,42 @@ impl SimClient {
     }
 
     #[cfg(test)]
-    pub(crate) async fn start_standalone(&self, name: &str) -> Result<TraceClient> {
-        self.start_trace(name, ScopeInfo::Integrated(Default::default()), None)
+    pub(crate) async fn init_and_start_trace(&self, name: &str) -> Result<TraceClient> {
+        let trace_info = TraceInfo::new(name);
+        self.init_trace(trace_info).await?;
+        self.start_trace(name.to_string(), ScopeInfo::Integrated(Default::default()))
             .await
     }
 
-    pub(crate) async fn start_trace(
-        &self,
-        name: &str,
-        scope_info: ScopeInfo,
-        trace_id: Option<Uuid>,
-    ) -> Result<TraceClient> {
-        let start_time = DateTime::now_utc();
-        let trace_id = trace_id.unwrap_or_else(Uuid::now_v7);
-        let scope = Scope::from(&scope_info);
-        debug!("start trace {trace_id}");
-        self.client
-            .rpc(StartTrace {
-                trace_id,
+    pub async fn init_trace(&self, info: TraceInfo) -> Result<()> {
+        debug!("init trace {info:?}");
+        let trace_id = self
+            .client
+            .rpc(InitTrace {
+                info,
                 session_id: self.session_id,
-                name: name.to_string(),
-                scope: scope_info,
+                start_time: DateTime::now_utc(),
+            })
+            .await??;
+        debug!("init trace {trace_id}: OK");
+        Ok(())
+    }
+
+    pub async fn status(&self, session_id: Uuid) -> Result<Option<GetSessionResponse>> {
+        let res = self.client.rpc(GetSession { session_id }).await??;
+        Ok(res)
+    }
+
+    pub async fn start_trace(&self, name: String, scope_info: ScopeInfo) -> Result<TraceClient> {
+        let start_time = DateTime::now_utc();
+        debug!("start trace {name}");
+        let scope = Scope::from(&scope_info);
+        let trace_id = self
+            .client
+            .rpc(StartTrace {
+                session_id: self.session_id,
+                name,
+                scope_info,
                 start_time,
             })
             .await??;
@@ -241,7 +326,7 @@ impl SimClient {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct TraceClient {
+pub struct TraceClient {
     client: irpc::Client<SimMessage, SimProtocol, SimService>,
     trace_id: Uuid,
     scope: Scope,
@@ -251,16 +336,19 @@ impl TraceClient {
     pub(crate) async fn put_checkpoint(
         &self,
         id: CheckpointId,
+        node_idx: NodeIdx,
         label: Option<String>,
+        result: Result<(), String>,
     ) -> Result<()> {
         let time = DateTime::now_utc();
         self.client
             .rpc(PutCheckpoint {
                 trace_id: self.trace_id,
                 checkpoint_id: id,
-                scope: self.scope,
+                node_idx,
                 time,
                 label,
+                result,
             })
             .await??;
         Ok(())

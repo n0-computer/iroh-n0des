@@ -11,20 +11,21 @@ use anyhow::{Context as _, Result};
 use iroh::{Endpoint, NodeAddr, NodeId, Watcher};
 use iroh_metrics::{encoding::Encoder, Registry};
 use n0_future::{FuturesUnordered, TryStreamExt};
-use proto::{CheckpointId, NodeInfo, NodeInfoWithAddr, ScopeInfo, SimClient, TraceClient};
+use proto::{NodeInfo, NodeInfoWithAddr, ScopeInfo, SimClient, TraceClient, TraceInfo};
 use tokio::sync::Semaphore;
 use trace::submit_logs;
 use tracing::{error_span, Instrument, Span};
 
 use crate::n0des::N0de;
 
+pub mod events;
 pub mod proto;
 mod trace;
 
 pub const ENV_TRACE_ISOLATED: &str = "N0DES_TRACE_ISOLATED";
+pub const ENV_TRACE_INIT_ONLY: &str = "N0DES_TRACE_INIT_ONLY";
 pub const ENV_TRACE_SERVER: &str = "N0DES_TRACE_SERVER";
 pub const ENV_TRACE_SESSION_ID: &str = "N0DES_SESSION_ID";
-pub const ENV_TRACE_ID: &str = "N0DES_TRACE_ID";
 
 /// Simulation context passed to each node
 #[derive(Debug, Clone)]
@@ -157,7 +158,6 @@ impl<N: N0de> Simulation<N> {
     }
 
     async fn run_inner(&mut self) -> Result<()> {
-        self.submit(0, "spawned".to_string()).await?;
         self.if_isolated(async |client| {
             client.wait_checkpoint(0, self.node_count).await?;
             Ok(())
@@ -171,58 +171,54 @@ impl<N: N0de> Simulation<N> {
         Ok(())
     }
 
-    async fn submit(
-        &mut self,
-        checkpoint_id: CheckpointId,
-        checkpoint_label: String,
-    ) -> Result<()> {
-        if let Some(ref client) = self.trace_client {
-            client
-                .put_checkpoint(checkpoint_id, Some(checkpoint_label))
-                .await?;
-
-            submit_logs(client).await?;
-
-            for node in self.nodes.iter_mut() {
-                let metrics = node.encoder.export();
-                client
-                    .put_metrics(node.node_id(), Some(checkpoint_id), metrics)
-                    .await?;
-            }
-        }
-        Ok(())
-    }
-
     async fn run_round(&mut self) -> Result<()> {
         println!("Round {}", self.round);
+
         let ctx = self.context(0);
         let round_fn = self.round_fn.clone();
+
+        let run_fn = async |node: &mut SimNode<N>| {
+            let mut ctx = ctx.clone();
+            ctx.node_index = node.idx;
+            let start = n0_future::time::Instant::now();
+
+            let res = (round_fn)(&ctx, &mut node.node)
+                .await
+                .with_context(|| format!("Node {} failed in round {}", ctx.node_index, ctx.round));
+
+            if let Some(ref client) = self.trace_client {
+                let checkpoint = ctx.round + 1;
+                client
+                    .put_checkpoint(
+                        checkpoint,
+                        ctx.node_index as u32,
+                        Some(format!("round {checkpoint} end")),
+                        res.as_ref().map_err(|err| format!("{:#}", err)).map(|_| ()),
+                    )
+                    .await?;
+
+                let metrics = node.encoder.export();
+                client
+                    .put_metrics(node.node_id(), Some(checkpoint), metrics)
+                    .await?;
+            }
+
+            res?;
+
+            anyhow::Ok(RoundOutcome {
+                node_idx: node.idx,
+                duration: start.elapsed(),
+                node_id: ctx.self_addr().node_id,
+            })
+        };
         let futures = self.nodes.iter_mut().map(|node| {
             let span = node.span.clone();
-            let ctx = ctx.clone();
-            let round_fn = round_fn.clone();
-            async move {
-                let mut ctx = ctx.clone();
-                ctx.node_index = node.idx;
-                let start = n0_future::time::Instant::now();
-                (round_fn)(&ctx, &mut node.node).await.with_context(|| {
-                    format!("Node {} failed in round {}", ctx.node_index, ctx.round)
-                })?;
-                anyhow::Ok(RoundOutcome {
-                    node_idx: node.idx,
-                    duration: start.elapsed(),
-                    node_id: ctx.self_addr().node_id,
-                })
-            }
-            .instrument(span)
+            run_fn(node).instrument(span)
         });
 
         // TODO: submit errors
         let _res: Vec<_> = n0_future::FuturesOrdered::from_iter(futures)
             .try_collect()
-            .await?;
-
-        self.submit(self.round + 1, format!("round {} end", self.round + 1))
             .await?;
 
         self.if_isolated(async |client| {
@@ -235,13 +231,17 @@ impl<N: N0de> Simulation<N> {
 
         println!("Round {} completed", self.round);
         if let Some(check) = &self.check_fn {
-            for (i, node) in self.nodes.iter().enumerate() {
-                let span = node.span.clone();
-                let _guard = span.enter();
-                let ctx = self.context(i);
+            for node in self.nodes.iter() {
+                let _guard = node.span.enter();
+                let ctx = self.context(node.idx);
                 (check)(&ctx, &node.node)?;
             }
         }
+
+        if let Some(ref client) = self.trace_client {
+            submit_logs(client).await?;
+        }
+
         Ok(())
     }
 }
@@ -282,7 +282,7 @@ impl<N: N0de> SimulationBuilder<N> {
         self
     }
 
-    pub async fn build(self, simulation_name: &str) -> Result<Simulation<N>> {
+    pub async fn build(self, trace_name: &str) -> Result<Simulation<N>> {
         let nodes: Vec<_> = match self.run_mode {
             RunMode::Integrated => {
                 FuturesUnordered::from_iter(
@@ -300,7 +300,15 @@ impl<N: N0de> SimulationBuilder<N> {
             }
         };
 
-        let trace_client = if let Some(client) = client_from_env()? {
+        let client = if let Some(client) = client_from_env()? {
+            if matches!(self.run_mode, RunMode::Integrated) {
+                let info = TraceInfo {
+                    name: trace_name.to_string(),
+                    expected_nodes: Some(self.node_count),
+                    expected_checkpoints: Some(self.max_rounds),
+                };
+                client.init_trace(info).await?;
+            }
             let scope = match self.run_mode {
                 RunMode::Integrated => {
                     let node_info = nodes.iter().map(|node| node.info()).collect();
@@ -309,18 +317,11 @@ impl<N: N0de> SimulationBuilder<N> {
                 RunMode::Isolated(idx) => {
                     let node_info = nodes[0].info();
                     debug_assert_eq!(node_info.idx, idx);
-                    ScopeInfo::Isolated {
-                        node: node_info,
-                        total_count: self.node_count,
-                    }
+                    ScopeInfo::Isolated(node_info)
                 }
             };
-            let trace_id = match std::env::var(ENV_TRACE_ID) {
-                Ok(id) => Some(id.parse()?),
-                Err(_) => None,
-            };
             let trace_client = client
-                .start_trace(simulation_name, scope, trace_id)
+                .start_trace(trace_name.to_string(), scope)
                 .await
                 .context("failed to connect to sim server")?;
             Some(trace_client)
@@ -328,7 +329,7 @@ impl<N: N0de> SimulationBuilder<N> {
             None
         };
 
-        let addrs = match (&trace_client, self.run_mode) {
+        let addrs = match (&client, self.run_mode) {
             (Some(client), RunMode::Isolated(_)) => {
                 let node = &nodes[0];
                 let info = node.info_with_addr().await?;
@@ -348,13 +349,13 @@ impl<N: N0de> SimulationBuilder<N> {
         };
 
         Ok(Simulation {
-            name: simulation_name.to_string(),
+            name: trace_name.to_string(),
             max_rounds: self.max_rounds,
             round_fn: self.round_fn,
             check_fn: self.check_fn,
             nodes,
             addrs: Arc::new(addrs.into_iter().map(|n| (n.info.idx, n)).collect()),
-            trace_client,
+            trace_client: client,
             round: 0,
             run_mode: self.run_mode,
             node_count: self.node_count,
@@ -421,7 +422,12 @@ pub fn is_sim_env() -> bool {
 fn client_from_env() -> Result<Option<SimClient>> {
     static CLIENT: OnceLock<Result<Option<SimClient>>> = OnceLock::new();
     CLIENT
-        .get_or_init(SimClient::from_env)
+        .get_or_init(|| {
+            // create a span so that the quinn endpoint is associated.
+            let span = tracing::error_span!("trace-client");
+            let _guard = span.enter();
+            SimClient::from_env()
+        })
         .as_ref()
         .map_err(|err| anyhow::anyhow!("failed to init sim client: {err:#}"))
         .cloned()
@@ -462,6 +468,20 @@ where
             err
         })
         .with_context(|| format!("simulation builder function `{name}` failed"))?;
+
+    if std::env::var(ENV_TRACE_INIT_ONLY).is_ok() {
+        let client = client_from_env()?.expect("failed to build client");
+        client
+            .init_trace(TraceInfo {
+                name: name.to_string(),
+                expected_nodes: Some(builder.node_count),
+                expected_checkpoints: Some(builder.max_rounds),
+            })
+            .await?;
+        println!("{}", builder.node_count);
+        return Ok(());
+    }
+
     if let Some(isolated_idx) = isolated {
         builder = builder.isolated(isolated_idx);
     }
@@ -486,6 +506,7 @@ mod tests {
 
     use iroh::protocol::Router;
     use iroh_ping::{Ping, ALPN as PingALPN};
+    use rand::seq::IteratorRandom;
 
     use super::*;
 
@@ -524,6 +545,9 @@ mod tests {
                 for other in ctx.all_other_nodes(me) {
                     tracing::info!("Sending message:\n\tfrom: {me}\n\tto:  {}", other.node_id);
                     ping.ping(&endpoint, other.clone()).await?;
+                    if ctx.round == 0 {
+                        crate::simulation::events::event(me, other.node_id, "custom event");
+                    }
                 }
             }
             Ok(true)
@@ -551,7 +575,7 @@ mod tests {
             return Ok(());
         };
         super::trace::try_init_global_subscriber();
-        let trace_client = client.start_standalone("foo").await?;
+        let trace_client = client.init_and_start_trace("foo").await?;
 
         tracing::info!("hello world");
         let span = tracing::info_span!("req", id = 1, method = "get");
@@ -567,5 +591,74 @@ mod tests {
         tracing::debug!(foo = "bar", "bazza");
         super::trace::submit_logs(&trace_client).await?;
         Ok(())
+    }
+
+    #[crate::sim]
+    async fn test_conn() -> Result<SimulationBuilder<PingNode>> {
+        async fn tick(ctx: &Context, node: &mut PingNode) -> Result<bool> {
+            let me = node.router.endpoint().node_id();
+            if ctx.node_index == 1 {
+                for other in ctx.all_other_nodes(me) {
+                    node.ping
+                        .ping(&node.router.endpoint(), other.clone())
+                        .await?;
+                }
+            }
+            Ok(true)
+        }
+
+        fn check(_ctx: &Context, _node: &PingNode) -> Result<()> {
+            // let metrics = node.ping.metrics();
+            // let node_count = ctx.addrs.len() as u64;
+            // match ctx.node_index % 2 {
+            //     0 => assert_eq!(metrics.pings_sent.get(), (node_count / 2) * (ctx.round + 1)),
+            //     _ => assert_eq!(metrics.pings_recv.get(), (node_count / 2) * (ctx.round + 1)),
+            // }
+            Ok(())
+        }
+
+        Ok(Simulation::builder(tick).max_rounds(1).check(check))
+    }
+
+    #[derive(Debug, Clone)]
+    struct NoopNode {
+        endpoint: Endpoint,
+        active_event: Option<(String, NodeId)>,
+    }
+    impl N0de for NoopNode {
+        async fn spawn(endpoint: Endpoint, _metrics: &mut Registry) -> Result<Self>
+        where
+            Self: Sized,
+        {
+            Ok(NoopNode {
+                endpoint,
+                active_event: None,
+            })
+        }
+    }
+
+    #[crate::sim]
+    async fn custom_events() -> Result<SimulationBuilder<NoopNode>> {
+        async fn tick(ctx: &Context, node: &mut NoopNode) -> Result<bool> {
+            let me = node.endpoint.node_id();
+            if let Some((id, other_node)) = node.active_event.take() {
+                self::events::event_end(me, other_node, "done", id);
+            }
+            let other = ctx
+                .all_other_nodes(me)
+                .choose(&mut rand::rngs::OsRng)
+                .unwrap();
+            let id = format!("ping:n{}:r{}", ctx.node_index, ctx.round);
+            self::events::event_start(
+                me.fmt_short(),
+                other.node_id.fmt_short(),
+                format!("ping round {}", ctx.round),
+                Some(&id),
+            );
+            node.active_event = Some((id, other.node_id));
+            Ok(true)
+        }
+
+        Ok(Simulation::builder(tick).max_rounds(4).node_count(4))
     }
 }
