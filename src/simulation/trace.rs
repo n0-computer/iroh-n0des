@@ -10,7 +10,7 @@ use tracing_subscriber::{
     EnvFilter, Layer,
 };
 
-use super::proto::TraceClient;
+use super::proto::ActiveTrace;
 
 pub(crate) fn try_init_global_subscriber() {
     static DID_INIT: OnceLock<bool> = OnceLock::new();
@@ -51,7 +51,7 @@ pub(crate) fn global_writer() -> LineWriter {
     WRITER.get_or_init(Default::default).clone()
 }
 
-pub(crate) async fn submit_logs(client: &TraceClient) -> anyhow::Result<()> {
+pub(crate) async fn submit_logs(client: &ActiveTrace) -> anyhow::Result<()> {
     let writer = global_writer();
     writer.submit(client).await?;
     Ok(())
@@ -95,7 +95,7 @@ impl LineWriter {
         self.buf.lock().expect("lock poisoned").clear();
     }
 
-    pub async fn submit(&self, client: &TraceClient) -> anyhow::Result<()> {
+    pub async fn submit(&self, client: &ActiveTrace) -> anyhow::Result<()> {
         let lines = {
             let mut buf = self.buf.lock().expect("lock poisoned");
             let lines = buf

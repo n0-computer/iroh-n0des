@@ -11,7 +11,7 @@ use anyhow::{Context as _, Result};
 use iroh::{Endpoint, NodeAddr, NodeId, Watcher};
 use iroh_metrics::{encoding::Encoder, Registry};
 use n0_future::{FuturesUnordered, TryStreamExt};
-use proto::{NodeInfo, NodeInfoWithAddr, ScopeInfo, SimClient, TraceClient, TraceInfo};
+use proto::{ActiveTrace, NodeInfo, NodeInfoWithAddr, ScopeInfo, TraceClient, TraceInfo};
 use tokio::sync::Semaphore;
 use trace::submit_logs;
 use tracing::{error, error_span, Instrument, Span};
@@ -72,7 +72,7 @@ pub struct Simulation<N: N0de> {
     nodes: Vec<SimNode<N>>,
     addrs: Arc<BTreeMap<u32, NodeInfoWithAddr>>,
     round: u64,
-    trace_client: Option<TraceClient>,
+    trace_client: Option<ActiveTrace>,
     run_mode: RunMode,
 }
 
@@ -147,7 +147,7 @@ impl<N: N0de> Simulation<N> {
 
     async fn if_isolated<R>(
         &self,
-        f: impl AsyncFnOnce(&TraceClient) -> Result<R>,
+        f: impl AsyncFnOnce(&ActiveTrace) -> Result<R>,
     ) -> Result<Option<R>> {
         if let Some(ref client) = self.trace_client {
             if let RunMode::Isolated(_) = self.run_mode {
@@ -417,14 +417,14 @@ pub fn is_sim_env() -> bool {
     std::env::var(ENV_TRACE_SERVER).is_ok()
 }
 
-fn client_from_env() -> Result<Option<SimClient>> {
-    static CLIENT: OnceLock<Result<Option<SimClient>>> = OnceLock::new();
+fn client_from_env() -> Result<Option<TraceClient>> {
+    static CLIENT: OnceLock<Result<Option<TraceClient>>> = OnceLock::new();
     CLIENT
         .get_or_init(|| {
             // create a span so that the quinn endpoint is associated.
             let span = tracing::error_span!("trace-client");
             let _guard = span.enter();
-            SimClient::from_env()
+            TraceClient::from_env()
         })
         .as_ref()
         .map_err(|err| anyhow::anyhow!("failed to init sim client: {err:#}"))

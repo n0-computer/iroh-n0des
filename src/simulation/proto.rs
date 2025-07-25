@@ -15,9 +15,9 @@ use super::{ENV_TRACE_SERVER, ENV_TRACE_SESSION_ID};
 pub const ALPN: &[u8] = b"/iroh/n0des-sim/1";
 
 #[derive(Debug, Clone, Copy)]
-pub struct SimService;
+pub struct TraceService;
 
-impl Service for SimService {}
+impl Service for TraceService {}
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
 
@@ -42,9 +42,9 @@ impl From<anyhow::Error> for RemoteError {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[rpc_requests(SimService, message = SimMessage)]
+#[rpc_requests(TraceService, message = TraceMessage)]
 #[allow(clippy::large_enum_variant)]
-pub enum SimProtocol {
+pub enum TraceProtocol {
     #[rpc(tx=oneshot::Sender<RemoteResult<Option<GetSessionResponse>>>)]
     GetSession(GetSession),
     #[rpc(tx=oneshot::Sender<RemoteResult<Uuid>>)]
@@ -211,12 +211,12 @@ pub struct WaitStartResponse {
 }
 
 #[derive(Debug, Clone)]
-pub struct SimClient {
-    client: irpc::Client<SimMessage, SimProtocol, SimService>,
+pub struct TraceClient {
+    client: irpc::Client<TraceMessage, TraceProtocol, TraceService>,
     session_id: Uuid,
 }
 
-impl SimClient {
+impl TraceClient {
     pub fn from_env() -> Result<Option<Self>> {
         if let Ok(addr) = std::env::var(ENV_TRACE_SERVER) {
             let addr: SocketAddr = addr.parse()?;
@@ -224,36 +224,44 @@ impl SimClient {
                 Ok(id) => id.parse()?,
                 Err(_) => Uuid::now_v7(),
             };
-            Ok(Some(Self::new_quinn_insecure(addr, session_id)?))
+            Ok(Some(Self::connect_quinn_insecure(addr, session_id)?))
         } else {
             Ok(None)
         }
     }
 
-    pub fn new_quinn_insecure(remote: SocketAddr, session_id: Uuid) -> Result<Self> {
+    pub fn connect_quinn_insecure(remote: SocketAddr, session_id: Uuid) -> Result<Self> {
         let addr_localhost = "127.0.0.1:0".parse().unwrap();
         let endpoint = make_insecure_client_endpoint(addr_localhost)?;
-        Ok(Self::connect_quinn(endpoint, remote, session_id))
+        Ok(Self::connect_quinn_endpoint(endpoint, remote, session_id))
     }
 
-    pub fn connect_quinn(endpoint: quinn::Endpoint, remote: SocketAddr, session_id: Uuid) -> Self {
+    pub fn connect_quinn_endpoint(
+        endpoint: quinn::Endpoint,
+        remote: SocketAddr,
+        session_id: Uuid,
+    ) -> Self {
         let client = irpc::Client::quinn(endpoint, remote);
         Self { client, session_id }
     }
 
-    pub async fn new_iroh(remote: NodeId, session_id: Uuid) -> Result<Self> {
+    pub async fn connect_iroh(remote: NodeId, session_id: Uuid) -> Result<Self> {
         let endpoint = Endpoint::builder().discovery_local_network().bind().await?;
-        Ok(Self::connect_iroh(endpoint, remote, session_id))
+        Ok(Self::connect_iroh_endpoint(endpoint, remote, session_id))
     }
 
-    pub fn connect_iroh(endpoint: Endpoint, remote: impl Into<NodeAddr>, session_id: Uuid) -> Self {
+    pub fn connect_iroh_endpoint(
+        endpoint: Endpoint,
+        remote: impl Into<NodeAddr>,
+        session_id: Uuid,
+    ) -> Self {
         let conn = IrohRemoteConnection::new(endpoint, remote.into(), ALPN.to_vec());
         let client = irpc::Client::boxed(conn);
         Self { client, session_id }
     }
 
     #[cfg(test)]
-    pub(crate) async fn init_and_start_trace(&self, name: &str) -> Result<TraceClient> {
+    pub(crate) async fn init_and_start_trace(&self, name: &str) -> Result<ActiveTrace> {
         let trace_info = TraceInfo::new(name);
         self.init_trace(trace_info).await?;
         self.start_trace(name.to_string(), ScopeInfo::Integrated(Default::default()))
@@ -279,7 +287,7 @@ impl SimClient {
         Ok(res)
     }
 
-    pub async fn start_trace(&self, name: String, scope_info: ScopeInfo) -> Result<TraceClient> {
+    pub async fn start_trace(&self, name: String, scope_info: ScopeInfo) -> Result<ActiveTrace> {
         let start_time = DateTime::now_utc();
         debug!("start trace {name}");
         let scope = Scope::from(&scope_info);
@@ -293,7 +301,7 @@ impl SimClient {
             })
             .await??;
         debug!("start trace {trace_id}: OK");
-        Ok(TraceClient {
+        Ok(ActiveTrace {
             client: self.client.clone(),
             trace_id,
             scope,
@@ -302,13 +310,13 @@ impl SimClient {
 }
 
 #[derive(Debug, Clone)]
-pub struct TraceClient {
-    client: irpc::Client<SimMessage, SimProtocol, SimService>,
+pub struct ActiveTrace {
+    client: irpc::Client<TraceMessage, TraceProtocol, TraceService>,
     trace_id: Uuid,
     scope: Scope,
 }
 
-impl TraceClient {
+impl ActiveTrace {
     pub(crate) async fn put_checkpoint(
         &self,
         id: CheckpointId,
