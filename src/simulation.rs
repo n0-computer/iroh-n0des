@@ -14,7 +14,7 @@ use n0_future::{FuturesUnordered, TryStreamExt};
 use proto::{NodeInfo, NodeInfoWithAddr, ScopeInfo, SimClient, TraceClient, TraceInfo};
 use tokio::sync::Semaphore;
 use trace::submit_logs;
-use tracing::{error_span, Instrument, Span};
+use tracing::{error, error_span, Instrument, Span};
 
 use crate::n0des::N0de;
 
@@ -165,7 +165,10 @@ impl<N: N0de> Simulation<N> {
         .await?;
 
         while self.round < self.max_rounds {
-            self.run_round().await?;
+            if let Err(err) = self.run_round().await {
+                error!("Simulation failed at round {}: {err:#}", self.round);
+                return Err(err);
+            }
             self.round += 1;
         }
         Ok(())
@@ -180,11 +183,13 @@ impl<N: N0de> Simulation<N> {
         let run_fn = async |node: &mut SimNode<N>| {
             let mut ctx = ctx.clone();
             ctx.node_index = node.idx;
-            let start = n0_future::time::Instant::now();
-
             let res = (round_fn)(&ctx, &mut node.node)
                 .await
                 .with_context(|| format!("Node {} failed in round {}", ctx.node_index, ctx.round));
+
+            if let Err(err) = res.as_ref() {
+                error!("{err:#}");
+            }
 
             if let Some(ref client) = self.trace_client {
                 let checkpoint = ctx.round + 1;
@@ -203,20 +208,13 @@ impl<N: N0de> Simulation<N> {
                     .await?;
             }
 
-            res?;
-
-            anyhow::Ok(RoundOutcome {
-                node_idx: node.idx,
-                duration: start.elapsed(),
-                node_id: ctx.self_addr().node_id,
-            })
+            anyhow::Ok(())
         };
         let futures = self.nodes.iter_mut().map(|node| {
             let span = node.span.clone();
             run_fn(node).instrument(span)
         });
 
-        // TODO: submit errors
         let _res: Vec<_> = n0_future::FuturesOrdered::from_iter(futures)
             .try_collect()
             .await?;

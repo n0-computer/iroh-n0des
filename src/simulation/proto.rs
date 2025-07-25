@@ -63,18 +63,7 @@ pub enum SimProtocol {
     WaitCheckpoint(WaitCheckpoint),
     #[rpc(tx=oneshot::Sender<RemoteResult<WaitStartResponse>>)]
     WaitStart(WaitStart),
-    // #[rpc(tx=oneshot::Sender<RemoteResult<WaitStartResponse>>)]
-    // BarrierWait(Moment),
 }
-
-// #[derive(Debug, Serialize, Deserialize, Clone)]
-// pub struct GetTraceSummary(Uuid);
-
-// #[derive(Debug, Serialize, Deserialize, Clone)]
-// pub struct GetEvents(Uuid);
-
-// #[derive(Debug, Serialize, Deserialize, Clone)]
-// pub struct TraceSummary {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GetSession {
@@ -201,19 +190,6 @@ pub struct PutCheckpoint {
     pub time: DateTime,
     pub result: Result<(), String>,
 }
-
-// #[derive(Debug, Serialize, Deserialize, Clone)]
-// pub struct BarrierWait {
-//     pub trace_id: Uuid,
-//     pub moment: Moment,
-// }
-
-// #[derive(Debug, Serialize, Deserialize, Clone)]
-// pub enum Moment {
-//     Start,
-//     Checkpoint(CheckpointId),
-//     End,
-// }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WaitCheckpoint {
