@@ -39,7 +39,7 @@ tracing-subscriber = { version = "0.3.19", features = [
 serde_json = "1.0.140"
 
 [dev-dependencies]
-iroh-ping = { git = "https://github.com/Frando/iroh-ping", branch = "Frando/dont-close-endpoint" }
+iroh-ping = { git = "https://github.com/n0-computer/iroh-ping", branch = "main" }
 
 [workspace]
 members = ["iroh-n0des-macro"]
