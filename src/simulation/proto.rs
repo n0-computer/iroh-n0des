@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use anyhow::Result;
 use iroh::{Endpoint, NodeAddr, NodeId};
 use iroh_metrics::encoding::Update;
-use irpc::{channel::oneshot, rpc_requests, util::make_insecure_client_endpoint, Service};
+use irpc::{Service, channel::oneshot, rpc_requests, util::make_insecure_client_endpoint};
 use irpc_iroh::IrohRemoteConnection;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime as DateTime;

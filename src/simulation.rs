@@ -9,12 +9,12 @@ use std::{
 
 use anyhow::{Context as _, Result};
 use iroh::{Endpoint, NodeAddr, NodeId, Watcher};
-use iroh_metrics::{encoding::Encoder, Registry};
+use iroh_metrics::{Registry, encoding::Encoder};
 use n0_future::{FuturesUnordered, TryStreamExt};
 use proto::{ActiveTrace, NodeInfo, NodeInfoWithAddr, ScopeInfo, TraceClient, TraceInfo};
 use tokio::sync::Semaphore;
 use trace::submit_logs;
-use tracing::{error, error_span, Instrument, Span};
+use tracing::{Instrument, Span, error, error_span};
 
 use crate::n0des::N0de;
 
@@ -331,8 +331,8 @@ impl<N: N0de> SimulationBuilder<N> {
             (Some(client), RunMode::Isolated(_)) => {
                 let node = &nodes[0];
                 let info = node.info_with_addr().await?;
-                let infos = client.wait_start(info, self.node_count).await?;
-                infos
+
+                client.wait_start(info, self.node_count).await?
             }
             _ => {
                 let addrs: Vec<_> = FuturesUnordered::from_iter(nodes.iter().map(|n| async {
@@ -503,7 +503,7 @@ where
 mod tests {
 
     use iroh::protocol::Router;
-    use iroh_ping::{Ping, ALPN as PingALPN};
+    use iroh_ping::{ALPN as PingALPN, Ping};
     use rand::seq::IteratorRandom;
 
     use super::*;

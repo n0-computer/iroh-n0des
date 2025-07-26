@@ -4,10 +4,10 @@ use std::{
 };
 
 use tracing_subscriber::{
-    fmt::{writer::MutexGuardWriter, MakeWriter},
+    EnvFilter, Layer,
+    fmt::{MakeWriter, writer::MutexGuardWriter},
     layer::SubscriberExt,
     util::SubscriberInitExt,
-    EnvFilter, Layer,
 };
 
 use super::proto::ActiveTrace;
