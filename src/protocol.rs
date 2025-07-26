@@ -1,5 +1,5 @@
 use anyhow::Result;
-use irpc::{channel::oneshot, rpc_requests, Service};
+use irpc::{Service, channel::oneshot, rpc_requests};
 use rcan::Rcan;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

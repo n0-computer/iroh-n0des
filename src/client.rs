@@ -4,9 +4,9 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{Result, anyhow, ensure};
 use iroh::{Endpoint, NodeAddr, NodeId};
-use iroh_metrics::{encoding::Encoder, Registry};
+use iroh_metrics::{Registry, encoding::Encoder};
 use irpc_iroh::IrohRemoteConnection;
 use n0_future::task::AbortOnDropHandle;
 use rand::Rng;
@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::{
     caps::Caps,
-    protocol::{Auth, N0desClient, Ping, PutMetrics, RemoteError, ALPN},
+    protocol::{ALPN, Auth, N0desClient, Ping, PutMetrics, RemoteError},
 };
 
 #[derive(Debug)]
