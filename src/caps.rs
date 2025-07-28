@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, fmt, str::FromStr, time::Duration};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use ed25519_dalek::SigningKey;
 use iroh::NodeId;
 use rcan::{Capability, Expires, Rcan};
