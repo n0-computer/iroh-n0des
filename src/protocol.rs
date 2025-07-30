@@ -1,5 +1,5 @@
 use anyhow::Result;
-use irpc::{Service, channel::oneshot, rpc_requests};
+use irpc::{channel::oneshot, rpc_requests};
 use rcan::Rcan;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -8,14 +8,9 @@ use crate::caps::Caps;
 
 pub const ALPN: &[u8] = b"/iroh/n0des/1";
 
-pub type N0desClient = irpc::Client<N0desMessage, N0desProtocol, N0desService>;
+pub type N0desClient = irpc::Client<N0desProtocol>;
 
-#[derive(Debug, Clone, Copy)]
-pub struct N0desService;
-
-impl Service for N0desService {}
-
-#[rpc_requests(N0desService, message = N0desMessage)]
+#[rpc_requests(message = N0desMessage)]
 #[derive(Debug, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum N0desProtocol {
