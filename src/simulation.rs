@@ -8,13 +8,17 @@ use std::{
 };
 
 use anyhow::{Context as _, Result};
-use iroh::{Endpoint, NodeAddr, NodeId, Watcher};
 use iroh_metrics::{Registry, encoding::Encoder};
 use n0_future::{FuturesUnordered, TryStreamExt};
 use proto::{ActiveTrace, NodeInfo, NodeInfoWithAddr, ScopeInfo, TraceClient, TraceInfo};
 use tokio::sync::Semaphore;
 use trace::submit_logs;
 use tracing::{Instrument, Span, error, error_span};
+
+use crate::iroh::{Endpoint, NodeAddr, NodeId};
+
+#[cfg(feature = "iroh_main")]
+use iroh::Watcher;
 
 use crate::n0des::N0de;
 
@@ -337,7 +341,7 @@ impl<N: N0de> SimulationBuilder<N> {
             _ => {
                 let addrs: Vec<_> = FuturesUnordered::from_iter(nodes.iter().map(|n| async {
                     let info = n.info();
-                    let addr = n.endpoint.node_addr().initialized().await;
+                    let addr = node_addr(&n.endpoint).await?;
                     anyhow::Ok(NodeInfoWithAddr { info, addr })
                 }))
                 .try_collect()
@@ -378,7 +382,14 @@ impl<N: N0de> SimNode<N> {
         let (node, endpoint, registry) = async move {
             let mut registry = Registry::default();
             let endpoint = Endpoint::builder().bind().await?;
+
+            // TODO(Frando): enable metrics support for iroh 0.35
+            // iroh@0.35 uses iroh-metrics@0.34, which is a major version down from iroh-metrics@0.35
+            // which is used here, thus the traits are incompatible.
+            // Add shim to iroh-metrics@0.35 to support registering metrics from iroh-metrics@0.34
+            #[cfg(not(feature = "iroh_v035"))]
             registry.register_all(endpoint.metrics());
+
             let node = N::spawn(endpoint.clone(), &mut registry).await?;
             anyhow::Ok((node, endpoint, registry))
         }
@@ -408,9 +419,17 @@ impl<N: N0de> SimNode<N> {
 
     async fn info_with_addr(&self) -> Result<NodeInfoWithAddr> {
         let info = self.info();
-        let addr = self.endpoint.node_addr().initialized().await;
+        let addr = node_addr(&self.endpoint).await?;
         Ok(NodeInfoWithAddr { info, addr })
     }
+}
+
+async fn node_addr(endpoint: &Endpoint) -> anyhow::Result<NodeAddr> {
+    #[cfg(feature = "iroh_v035")]
+    let addr = endpoint.node_addr().await?;
+    #[cfg(not(feature = "iroh_v035"))]
+    let addr = endpoint.node_addr().initialized().await;
+    Ok(addr)
 }
 
 pub fn is_sim_env() -> bool {
@@ -502,24 +521,92 @@ where
 #[cfg(test)]
 mod tests {
 
-    use iroh::protocol::Router;
-    use iroh_ping::{ALPN as PingALPN, Ping};
+    use iroh_metrics::Counter;
     use rand::seq::IteratorRandom;
+    use std::sync::Arc;
+    use tracing::{debug, instrument};
+
+    use crate::iroh::{
+        endpoint::Connection,
+        protocol::{ProtocolHandler, Router},
+    };
 
     use super::*;
 
+    const ALPN: &[u8] = b"iroh-n0des/test/ping/0";
+
+    #[derive(Debug, Clone, Default)]
+    struct Ping {
+        metrics: Arc<Metrics>,
+    }
+
+    #[derive(Debug, Default, iroh_metrics::MetricsGroup)]
+    #[metrics(name = "ping")]
+    struct Metrics {
+        /// count of valid ping messages sent
+        pub pings_sent: Counter,
+        /// count of valid ping messages received
+        pub pings_recv: Counter,
+    }
+
+    impl ProtocolHandler for Ping {
+        fn accept(&self, connection: Connection) -> n0_future::future::Boxed<Result<()>> {
+            let this = self.clone();
+            Box::pin(async move { this.accept(connection).await })
+        }
+    }
+
+    impl Ping {
+        async fn accept(&self, connection: Connection) -> Result<()> {
+            debug!("ping accepted");
+            let (mut send, mut recv) = connection.accept_bi().await?;
+            recv.read_to_end(2).await?;
+            debug!("ping received");
+            self.metrics.pings_recv.inc();
+            send.write_all(b"bye").await?;
+            send.finish()?;
+            debug!("pong sent");
+            let reason = connection.closed().await;
+            debug!(?reason, "connection closed");
+            Ok(())
+        }
+
+        #[instrument("ping-connect", skip_all, fields(remote = tracing::field::Empty))]
+        async fn ping(&self, endpoint: &Endpoint, addr: impl Into<NodeAddr>) -> Result<()> {
+            let addr: NodeAddr = addr.into();
+            tracing::Span::current()
+                .record("remote", tracing::field::display(addr.node_id.fmt_short()));
+            debug!("ping connect");
+            let connection = endpoint.connect(addr, ALPN).await?;
+            debug!("ping connected");
+            let (mut send, mut recv) = connection.open_bi().await?;
+            send.write_all(b"hi").await?;
+            send.finish()?;
+            debug!("ping sent");
+            self.metrics.pings_sent.inc();
+            recv.read_to_end(3).await?;
+            debug!("ping received");
+            connection.close(1u32.into(), b"");
+            Ok(())
+        }
+
+        fn metrics(&self) -> &Arc<Metrics> {
+            &self.metrics
+        }
+    }
+
     struct PingNode {
-        ping: Ping,
         router: Router,
+        ping: Ping,
     }
 
     impl N0de for PingNode {
         async fn spawn(ep: Endpoint, metrics: &mut Registry) -> Result<Self> {
-            let ping = Ping::new();
-            metrics.register(ping.metrics().clone());
+            let ping = Ping::default();
+            metrics.register(ping.metrics.clone());
 
-            let router = iroh::protocol::Router::builder(ep)
-                .accept(PingALPN, ping.clone())
+            let router = crate::iroh::protocol::Router::builder(ep)
+                .accept(ALPN, ping.clone())
                 .spawn();
 
             Ok(Self { ping, router })
@@ -531,37 +618,44 @@ mod tests {
         }
     }
 
+    impl PingNode {
+        async fn ping(&self, addr: impl Into<NodeAddr>) -> Result<()> {
+            self.ping.ping(self.router.endpoint(), addr).await
+        }
+    }
+
     #[crate::sim]
     async fn test_simulation() -> Result<SimulationBuilder<PingNode>> {
+        const EVENT_ID: &str = "ping";
         async fn tick(ctx: &Context, node: &mut PingNode) -> Result<bool> {
-            let me = node.router.endpoint().node_id();
-            let ping = node.ping.clone();
-            let endpoint = node.router.endpoint().clone();
-            let node_index = ctx.node_index;
+            let me = ctx.self_addr().node_id;
 
-            if node_index % 2 == 0 {
-                for other in ctx.all_other_nodes(me) {
-                    tracing::info!("Sending message:\n\tfrom: {me}\n\tto:  {}", other.node_id);
-                    ping.ping(&endpoint, other.clone()).await?;
-                    if ctx.round == 0 {
-                        crate::simulation::events::event(me, other.node_id, "custom event");
-                    }
-                }
-            }
+            let target = ctx
+                .all_other_nodes(me)
+                .choose(&mut rand::thread_rng())
+                .unwrap();
+            node.ping(target.clone()).await?;
+
+            // record event for simulation visualization.
+            iroh_n0des::simulation::events::event_start(
+                me.fmt_short(),
+                target.node_id.fmt_short(),
+                format!("send ping (round {})", ctx.round),
+                Some(EVENT_ID.to_string()),
+            );
             Ok(true)
         }
 
         fn check(ctx: &Context, node: &PingNode) -> Result<()> {
             let metrics = node.ping.metrics();
-            let node_count = ctx.addrs.len() as u64;
-            match ctx.node_index % 2 {
-                0 => assert_eq!(metrics.pings_sent.get(), (node_count / 2) * (ctx.round + 1)),
-                _ => assert_eq!(metrics.pings_recv.get(), (node_count / 2) * (ctx.round + 1)),
-            }
+            assert_eq!(metrics.pings_sent.get(), ctx.round + 1);
             Ok(())
         }
 
-        Ok(Simulation::builder(tick).max_rounds(3).check(check))
+        Ok(Simulation::builder(tick)
+            .node_count(4)
+            .max_rounds(3)
+            .check(check))
     }
 
     #[tokio::test]
@@ -644,7 +738,7 @@ mod tests {
             }
             let other = ctx
                 .all_other_nodes(me)
-                .choose(&mut rand::rngs::OsRng)
+                .choose(&mut rand::thread_rng())
                 .unwrap();
             let id = format!("ping:n{}:r{}", ctx.node_index, ctx.round);
             self::events::event_start(

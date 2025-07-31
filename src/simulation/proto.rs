@@ -1,9 +1,10 @@
 use std::net::SocketAddr;
 
+use crate::iroh::{NodeAddr, NodeId};
 use anyhow::Result;
-use iroh::{Endpoint, NodeAddr, NodeId};
 use iroh_metrics::encoding::Update;
 use irpc::{channel::oneshot, rpc_requests, util::make_insecure_client_endpoint};
+#[cfg(feature = "iroh_main")]
 use irpc_iroh::IrohRemoteConnection;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime as DateTime;
@@ -240,13 +241,15 @@ impl TraceClient {
         Self { client, session_id }
     }
 
+    #[cfg(feature = "iroh_main")]
     pub async fn connect_iroh(remote: NodeId, session_id: Uuid) -> Result<Self> {
-        let endpoint = Endpoint::builder().discovery_local_network().bind().await?;
+        let endpoint = iroh::Endpoint::builder().bind().await?;
         Ok(Self::connect_iroh_endpoint(endpoint, remote, session_id))
     }
 
+    #[cfg(feature = "iroh_main")]
     pub fn connect_iroh_endpoint(
-        endpoint: Endpoint,
+        endpoint: iroh::Endpoint,
         remote: impl Into<NodeAddr>,
         session_id: Uuid,
     ) -> Self {

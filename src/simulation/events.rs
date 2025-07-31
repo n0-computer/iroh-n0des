@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt};
 
-use iroh::NodeId;
+use crate::iroh::NodeId;
 
 pub struct EventId<'a, T>(Option<&'a T>);
 
