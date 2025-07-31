@@ -337,7 +337,7 @@ impl<N: N0de> SimulationBuilder<N> {
             _ => {
                 let addrs: Vec<_> = FuturesUnordered::from_iter(nodes.iter().map(|n| async {
                     let info = n.info();
-                    let addr = n.endpoint.node_addr().initialized().await?;
+                    let addr = n.endpoint.node_addr().initialized().await;
                     anyhow::Ok(NodeInfoWithAddr { info, addr })
                 }))
                 .try_collect()
@@ -408,7 +408,7 @@ impl<N: N0de> SimNode<N> {
 
     async fn info_with_addr(&self) -> Result<NodeInfoWithAddr> {
         let info = self.info();
-        let addr = self.endpoint.node_addr().initialized().await?;
+        let addr = self.endpoint.node_addr().initialized().await;
         Ok(NodeInfoWithAddr { info, addr })
     }
 }

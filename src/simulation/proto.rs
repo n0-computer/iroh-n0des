@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use anyhow::Result;
 use iroh::{Endpoint, NodeAddr, NodeId};
 use iroh_metrics::encoding::Update;
-use irpc::{Service, channel::oneshot, rpc_requests, util::make_insecure_client_endpoint};
+use irpc::{channel::oneshot, rpc_requests, util::make_insecure_client_endpoint};
 use irpc_iroh::IrohRemoteConnection;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime as DateTime;
@@ -13,11 +13,6 @@ use uuid::Uuid;
 use super::{ENV_TRACE_SERVER, ENV_TRACE_SESSION_ID};
 
 pub const ALPN: &[u8] = b"/iroh/n0des-sim/1";
-
-#[derive(Debug, Clone, Copy)]
-pub struct TraceService;
-
-impl Service for TraceService {}
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
 
@@ -42,7 +37,7 @@ impl From<anyhow::Error> for RemoteError {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[rpc_requests(TraceService, message = TraceMessage)]
+#[rpc_requests(message = TraceMessage)]
 #[allow(clippy::large_enum_variant)]
 pub enum TraceProtocol {
     #[rpc(tx=oneshot::Sender<RemoteResult<Option<GetSessionResponse>>>)]
@@ -212,7 +207,7 @@ pub struct WaitStartResponse {
 
 #[derive(Debug, Clone)]
 pub struct TraceClient {
-    client: irpc::Client<TraceMessage, TraceProtocol, TraceService>,
+    client: irpc::Client<TraceProtocol>,
     session_id: Uuid,
 }
 
@@ -311,7 +306,7 @@ impl TraceClient {
 
 #[derive(Debug, Clone)]
 pub struct ActiveTrace {
-    client: irpc::Client<TraceMessage, TraceProtocol, TraceService>,
+    client: irpc::Client<TraceProtocol>,
     trace_id: Uuid,
     scope: Scope,
 }
