@@ -549,10 +549,20 @@ mod tests {
         pub pings_recv: Counter,
     }
 
+    #[cfg(feature = "iroh_v035")]
     impl ProtocolHandler for Ping {
         fn accept(&self, connection: Connection) -> n0_future::future::Boxed<Result<()>> {
             let this = self.clone();
             Box::pin(async move { this.accept(connection).await })
+        }
+    }
+
+    #[cfg(all(feature = "iroh_main", not(feature = "iroh_v035")))]
+    impl ProtocolHandler for Ping {
+        async fn accept(&self, connection: Connection) -> Result<(), iroh::protocol::AcceptError> {
+            self.accept(connection)
+                .await
+                .map_err(|err| err.into_boxed_dyn_error().into())
         }
     }
 
@@ -700,12 +710,6 @@ mod tests {
         }
 
         fn check(_ctx: &Context, _node: &PingNode) -> Result<()> {
-            // let metrics = node.ping.metrics();
-            // let node_count = ctx.addrs.len() as u64;
-            // match ctx.node_index % 2 {
-            //     0 => assert_eq!(metrics.pings_sent.get(), (node_count / 2) * (ctx.round + 1)),
-            //     _ => assert_eq!(metrics.pings_recv.get(), (node_count / 2) * (ctx.round + 1)),
-            // }
             Ok(())
         }
 
