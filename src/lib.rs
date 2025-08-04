@@ -15,21 +15,17 @@ pub use iroh_n0des_macro::sim;
 // This lets us use the derive metrics in the lib tests within this crate.
 extern crate self as iroh_n0des;
 
-pub use iroh_metrics::Registry;
-
-#[cfg(feature = "iroh_v035")]
-pub use iroh_035 as iroh;
-
+pub use anyhow;
 #[cfg(all(feature = "iroh_main", not(feature = "iroh_v035")))]
 pub use iroh;
+#[cfg(feature = "iroh_v035")]
+pub use iroh_035 as iroh;
+pub use iroh_metrics::Registry;
 
-pub use anyhow;
-
+#[cfg(any(feature = "iroh_v035", feature = "iroh_main"))]
+pub use self::n0des::N0de;
 #[cfg(feature = "iroh_main")]
 pub use self::{
     client::{Client, ClientBuilder},
     protocol::ALPN,
 };
-
-#[cfg(any(feature = "iroh_v035", feature = "iroh_main"))]
-pub use self::n0des::N0de;

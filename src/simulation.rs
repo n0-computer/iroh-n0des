@@ -8,6 +8,8 @@ use std::{
 };
 
 use anyhow::{Context as _, Result};
+#[cfg(all(feature = "iroh_main", not(feature = "iroh_v035")))]
+use iroh::Watcher;
 use iroh_metrics::{Registry, encoding::Encoder};
 use n0_future::{FuturesUnordered, TryStreamExt};
 use proto::{ActiveTrace, NodeInfo, NodeInfoWithAddr, ScopeInfo, TraceClient, TraceInfo};
@@ -15,12 +17,10 @@ use tokio::sync::Semaphore;
 use trace::submit_logs;
 use tracing::{Instrument, Span, error, error_span};
 
-use crate::iroh::{Endpoint, NodeAddr, NodeId};
-
-#[cfg(all(feature = "iroh_main", not(feature = "iroh_v035")))]
-use iroh::Watcher;
-
-use crate::n0des::N0de;
+use crate::{
+    iroh::{Endpoint, NodeAddr, NodeId},
+    n0des::N0de,
+};
 
 pub mod events;
 pub mod proto;
@@ -521,17 +521,17 @@ where
 #[cfg(test)]
 mod tests {
 
+    use std::sync::Arc;
+
     use iroh_metrics::Counter;
     use rand::seq::IteratorRandom;
-    use std::sync::Arc;
     use tracing::{debug, instrument};
 
+    use super::*;
     use crate::iroh::{
         endpoint::Connection,
         protocol::{ProtocolHandler, Router},
     };
-
-    use super::*;
 
     const ALPN: &[u8] = b"iroh-n0des/test/ping/0";
 

@@ -1,6 +1,5 @@
 use std::net::SocketAddr;
 
-use crate::iroh::{NodeAddr, NodeId};
 use anyhow::Result;
 use iroh_metrics::encoding::Update;
 use irpc::{channel::oneshot, rpc_requests, util::make_insecure_client_endpoint};
@@ -12,6 +11,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::{ENV_TRACE_SERVER, ENV_TRACE_SESSION_ID};
+use crate::iroh::{NodeAddr, NodeId};
 
 pub const ALPN: &[u8] = b"/iroh/n0des-sim/1";
 
