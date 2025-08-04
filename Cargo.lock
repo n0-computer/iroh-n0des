@@ -299,6 +299,9 @@ name = "bytes"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "cc"
@@ -1333,7 +1336,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.59.0",
 ]
 
 [[package]]
@@ -1744,6 +1747,7 @@ name = "iroh-n0des"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "bytes",
  "derive_more 2.0.1",
  "ed25519-dalek",
  "iroh 0.35.0",
@@ -1754,6 +1758,7 @@ dependencies = [
  "irpc",
  "irpc-iroh",
  "n0-future",
+ "postcard",
  "rand 0.8.5",
  "rcan",
  "serde",
@@ -4601,7 +4606,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

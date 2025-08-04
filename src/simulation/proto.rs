@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use anyhow::Result;
+use bytes::Bytes;
 use iroh_metrics::encoding::Update;
 use irpc::{channel::oneshot, rpc_requests, util::make_insecure_client_endpoint};
 #[cfg(feature = "iroh_main")]
@@ -84,6 +85,7 @@ pub struct InitTrace {
     pub info: TraceInfo,
     #[serde(with = "time::serde::rfc3339")]
     pub start_time: DateTime,
+    pub user_data: Option<Bytes>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -146,7 +148,7 @@ pub struct EndTrace {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeInfo {
-    pub id: NodeId,
+    pub node_id: NodeId,
     pub idx: u32,
     pub label: Option<String>,
 }
@@ -261,12 +263,12 @@ impl TraceClient {
     #[cfg(test)]
     pub(crate) async fn init_and_start_trace(&self, name: &str) -> Result<ActiveTrace> {
         let trace_info = TraceInfo::new(name);
-        self.init_trace(trace_info).await?;
+        self.init_trace(trace_info, None).await?;
         self.start_trace(name.to_string(), ScopeInfo::Integrated(Default::default()))
             .await
     }
 
-    pub async fn init_trace(&self, info: TraceInfo) -> Result<()> {
+    pub async fn init_trace(&self, info: TraceInfo, user_data: Option<Bytes>) -> Result<()> {
         debug!("init trace {info:?}");
         let trace_id = self
             .client
@@ -274,6 +276,7 @@ impl TraceClient {
                 info,
                 session_id: self.session_id,
                 start_time: DateTime::now_utc(),
+                user_data,
             })
             .await??;
         debug!("init trace {trace_id}: OK");
@@ -315,7 +318,7 @@ pub struct ActiveTrace {
 }
 
 impl ActiveTrace {
-    pub(crate) async fn put_checkpoint(
+    pub async fn put_checkpoint(
         &self,
         id: CheckpointId,
         node_idx: NodeIdx,
@@ -336,7 +339,7 @@ impl ActiveTrace {
         Ok(())
     }
 
-    pub(crate) async fn put_metrics(
+    pub async fn put_metrics(
         &self,
         node_id: NodeId,
         checkpoint_id: Option<CheckpointId>,
@@ -355,7 +358,7 @@ impl ActiveTrace {
         Ok(())
     }
 
-    pub(crate) async fn put_logs(&self, json_lines: Vec<String>) -> Result<()> {
+    pub async fn put_logs(&self, json_lines: Vec<String>) -> Result<()> {
         self.client
             .rpc(PutLogs {
                 scope: self.scope,
@@ -366,7 +369,7 @@ impl ActiveTrace {
         Ok(())
     }
 
-    pub(crate) async fn wait_start(
+    pub async fn wait_start(
         &self,
         info: NodeInfoWithAddr,
         required_count: u32,
@@ -384,7 +387,7 @@ impl ActiveTrace {
         Ok(res.infos)
     }
 
-    pub(crate) async fn wait_checkpoint(
+    pub async fn wait_checkpoint(
         &self,
         checkpoint_id: CheckpointId,
         required_count: u32,
@@ -403,7 +406,7 @@ impl ActiveTrace {
         Ok(())
     }
 
-    pub(crate) async fn end_trace(&self, result: Result<(), String>) -> Result<()> {
+    pub async fn end_trace(&self, result: Result<(), String>) -> Result<()> {
         let end_time = DateTime::now_utc();
         self.client
             .rpc(EndTrace {
