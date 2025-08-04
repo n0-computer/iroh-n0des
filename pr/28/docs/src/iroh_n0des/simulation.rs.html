@@ -8,19 +8,19 @@
 <a href=#8 id=8 data-nosnippet>8</a>};
 <a href=#9 id=9 data-nosnippet>9</a>
 <a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span>anyhow::{Context <span class="kw">as _</span>, <span class="prelude-ty">Result</span>};
-<a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span>iroh_metrics::{Registry, encoding::Encoder};
-<a href=#12 id=12 data-nosnippet>12</a><span class="kw">use </span>n0_future::{FuturesUnordered, TryStreamExt};
-<a href=#13 id=13 data-nosnippet>13</a><span class="kw">use </span>proto::{ActiveTrace, NodeInfo, NodeInfoWithAddr, ScopeInfo, TraceClient, TraceInfo};
-<a href=#14 id=14 data-nosnippet>14</a><span class="kw">use </span>tokio::sync::Semaphore;
-<a href=#15 id=15 data-nosnippet>15</a><span class="kw">use </span>trace::submit_logs;
-<a href=#16 id=16 data-nosnippet>16</a><span class="kw">use </span>tracing::{Instrument, Span, error, error_span};
-<a href=#17 id=17 data-nosnippet>17</a>
-<a href=#18 id=18 data-nosnippet>18</a><span class="kw">use </span><span class="kw">crate</span>::iroh::{Endpoint, NodeAddr, NodeId};
+<a href=#11 id=11 data-nosnippet>11</a><span class="attr">#[cfg(all(feature = <span class="string">"iroh_main"</span>, not(feature = <span class="string">"iroh_v035"</span>)))]
+<a href=#12 id=12 data-nosnippet>12</a></span><span class="kw">use </span>iroh::Watcher;
+<a href=#13 id=13 data-nosnippet>13</a><span class="kw">use </span>iroh_metrics::{Registry, encoding::Encoder};
+<a href=#14 id=14 data-nosnippet>14</a><span class="kw">use </span>n0_future::{FuturesUnordered, TryStreamExt};
+<a href=#15 id=15 data-nosnippet>15</a><span class="kw">use </span>proto::{ActiveTrace, NodeInfo, NodeInfoWithAddr, ScopeInfo, TraceClient, TraceInfo};
+<a href=#16 id=16 data-nosnippet>16</a><span class="kw">use </span>tokio::sync::Semaphore;
+<a href=#17 id=17 data-nosnippet>17</a><span class="kw">use </span>trace::submit_logs;
+<a href=#18 id=18 data-nosnippet>18</a><span class="kw">use </span>tracing::{Instrument, Span, error, error_span};
 <a href=#19 id=19 data-nosnippet>19</a>
-<a href=#20 id=20 data-nosnippet>20</a><span class="attr">#[cfg(all(feature = <span class="string">"iroh_main"</span>, not(feature = <span class="string">"iroh_v035"</span>)))]
-<a href=#21 id=21 data-nosnippet>21</a></span><span class="kw">use </span>iroh::Watcher;
-<a href=#22 id=22 data-nosnippet>22</a>
-<a href=#23 id=23 data-nosnippet>23</a><span class="kw">use </span><span class="kw">crate</span>::n0des::N0de;
+<a href=#20 id=20 data-nosnippet>20</a><span class="kw">use crate</span>::{
+<a href=#21 id=21 data-nosnippet>21</a>    iroh::{Endpoint, NodeAddr, NodeId},
+<a href=#22 id=22 data-nosnippet>22</a>    n0des::N0de,
+<a href=#23 id=23 data-nosnippet>23</a>};
 <a href=#24 id=24 data-nosnippet>24</a>
 <a href=#25 id=25 data-nosnippet>25</a><span class="kw">pub mod </span>events;
 <a href=#26 id=26 data-nosnippet>26</a><span class="kw">pub mod </span>proto;
@@ -521,17 +521,17 @@
 <a href=#521 id=521 data-nosnippet>521</a><span class="attr">#[cfg(test)]
 <a href=#522 id=522 data-nosnippet>522</a></span><span class="kw">mod </span>tests {
 <a href=#523 id=523 data-nosnippet>523</a>
-<a href=#524 id=524 data-nosnippet>524</a>    <span class="kw">use </span>iroh_metrics::Counter;
-<a href=#525 id=525 data-nosnippet>525</a>    <span class="kw">use </span>rand::seq::IteratorRandom;
-<a href=#526 id=526 data-nosnippet>526</a>    <span class="kw">use </span>std::sync::Arc;
-<a href=#527 id=527 data-nosnippet>527</a>    <span class="kw">use </span>tracing::{debug, instrument};
-<a href=#528 id=528 data-nosnippet>528</a>
-<a href=#529 id=529 data-nosnippet>529</a>    <span class="kw">use </span><span class="kw">crate</span>::iroh::{
-<a href=#530 id=530 data-nosnippet>530</a>        endpoint::Connection,
-<a href=#531 id=531 data-nosnippet>531</a>        protocol::{ProtocolHandler, Router},
-<a href=#532 id=532 data-nosnippet>532</a>    };
-<a href=#533 id=533 data-nosnippet>533</a>
-<a href=#534 id=534 data-nosnippet>534</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#524 id=524 data-nosnippet>524</a>    <span class="kw">use </span>std::sync::Arc;
+<a href=#525 id=525 data-nosnippet>525</a>
+<a href=#526 id=526 data-nosnippet>526</a>    <span class="kw">use </span>iroh_metrics::Counter;
+<a href=#527 id=527 data-nosnippet>527</a>    <span class="kw">use </span>rand::seq::IteratorRandom;
+<a href=#528 id=528 data-nosnippet>528</a>    <span class="kw">use </span>tracing::{debug, instrument};
+<a href=#529 id=529 data-nosnippet>529</a>
+<a href=#530 id=530 data-nosnippet>530</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#531 id=531 data-nosnippet>531</a>    <span class="kw">use </span><span class="kw">crate</span>::iroh::{
+<a href=#532 id=532 data-nosnippet>532</a>        endpoint::Connection,
+<a href=#533 id=533 data-nosnippet>533</a>        protocol::{ProtocolHandler, Router},
+<a href=#534 id=534 data-nosnippet>534</a>    };
 <a href=#535 id=535 data-nosnippet>535</a>
 <a href=#536 id=536 data-nosnippet>536</a>    <span class="kw">const </span>ALPN: <span class="kw-2">&amp;</span>[u8] = <span class="string">b"iroh-n0des/test/ping/0"</span>;
 <a href=#537 id=537 data-nosnippet>537</a>
