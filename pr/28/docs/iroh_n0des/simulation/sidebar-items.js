@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ENV_TRACE_INIT_ONLY","ENV_TRACE_ISOLATED","ENV_TRACE_SERVER","ENV_TRACE_SESSION_ID"],"fn":["is_sim_env"],"mod":["events","proto"],"struct":["Context","RoundOutcome","Simulation","SimulationBuilder"],"trait":["AsyncCallback"]};
