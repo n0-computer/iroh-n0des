@@ -17,7 +17,7 @@ use tracing::{Instrument, Span, error, error_span};
 
 use crate::iroh::{Endpoint, NodeAddr, NodeId};
 
-#[cfg(feature = "iroh_main")]
+#[cfg(all(feature = "iroh_main", not(feature = "iroh_v035")))]
 use iroh::Watcher;
 
 use crate::n0des::N0de;

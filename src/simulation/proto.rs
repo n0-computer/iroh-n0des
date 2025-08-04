@@ -242,7 +242,7 @@ impl TraceClient {
     }
 
     #[cfg(feature = "iroh_main")]
-    pub async fn connect_iroh(remote: NodeId, session_id: Uuid) -> Result<Self> {
+    pub async fn connect_iroh(remote: iroh::NodeId, session_id: Uuid) -> Result<Self> {
         let endpoint = iroh::Endpoint::builder().bind().await?;
         Ok(Self::connect_iroh_endpoint(endpoint, remote, session_id))
     }
@@ -250,7 +250,7 @@ impl TraceClient {
     #[cfg(feature = "iroh_main")]
     pub fn connect_iroh_endpoint(
         endpoint: iroh::Endpoint,
-        remote: impl Into<NodeAddr>,
+        remote: impl Into<iroh::NodeAddr>,
         session_id: Uuid,
     ) -> Self {
         let conn = IrohRemoteConnection::new(endpoint, remote.into(), ALPN.to_vec());
