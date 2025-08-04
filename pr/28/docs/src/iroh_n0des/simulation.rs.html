@@ -710,57 +710,51 @@
 <a href=#710 id=710 data-nosnippet>710</a>        }
 <a href=#711 id=711 data-nosnippet>711</a>
 <a href=#712 id=712 data-nosnippet>712</a>        <span class="kw">fn </span>check(_ctx: <span class="kw-2">&amp;</span>Context, _node: <span class="kw-2">&amp;</span>PingNode) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
-<a href=#713 id=713 data-nosnippet>713</a>            <span class="comment">// let metrics = node.ping.metrics();
-<a href=#714 id=714 data-nosnippet>714</a>            // let node_count = ctx.addrs.len() as u64;
-<a href=#715 id=715 data-nosnippet>715</a>            // match ctx.node_index % 2 {
-<a href=#716 id=716 data-nosnippet>716</a>            //     0 =&gt; assert_eq!(metrics.pings_sent.get(), (node_count / 2) * (ctx.round + 1)),
-<a href=#717 id=717 data-nosnippet>717</a>            //     _ =&gt; assert_eq!(metrics.pings_recv.get(), (node_count / 2) * (ctx.round + 1)),
-<a href=#718 id=718 data-nosnippet>718</a>            // }
-<a href=#719 id=719 data-nosnippet>719</a>            </span><span class="prelude-val">Ok</span>(())
-<a href=#720 id=720 data-nosnippet>720</a>        }
-<a href=#721 id=721 data-nosnippet>721</a>
-<a href=#722 id=722 data-nosnippet>722</a>        <span class="prelude-val">Ok</span>(Simulation::builder(tick).max_rounds(<span class="number">1</span>).check(check))
+<a href=#713 id=713 data-nosnippet>713</a>            <span class="prelude-val">Ok</span>(())
+<a href=#714 id=714 data-nosnippet>714</a>        }
+<a href=#715 id=715 data-nosnippet>715</a>
+<a href=#716 id=716 data-nosnippet>716</a>        <span class="prelude-val">Ok</span>(Simulation::builder(tick).max_rounds(<span class="number">1</span>).check(check))
+<a href=#717 id=717 data-nosnippet>717</a>    }
+<a href=#718 id=718 data-nosnippet>718</a>
+<a href=#719 id=719 data-nosnippet>719</a>    <span class="attr">#[derive(Debug, Clone)]
+<a href=#720 id=720 data-nosnippet>720</a>    </span><span class="kw">struct </span>NoopNode {
+<a href=#721 id=721 data-nosnippet>721</a>        endpoint: Endpoint,
+<a href=#722 id=722 data-nosnippet>722</a>        active_event: <span class="prelude-ty">Option</span>&lt;(String, NodeId)&gt;,
 <a href=#723 id=723 data-nosnippet>723</a>    }
-<a href=#724 id=724 data-nosnippet>724</a>
-<a href=#725 id=725 data-nosnippet>725</a>    <span class="attr">#[derive(Debug, Clone)]
-<a href=#726 id=726 data-nosnippet>726</a>    </span><span class="kw">struct </span>NoopNode {
-<a href=#727 id=727 data-nosnippet>727</a>        endpoint: Endpoint,
-<a href=#728 id=728 data-nosnippet>728</a>        active_event: <span class="prelude-ty">Option</span>&lt;(String, NodeId)&gt;,
-<a href=#729 id=729 data-nosnippet>729</a>    }
-<a href=#730 id=730 data-nosnippet>730</a>    <span class="kw">impl </span>N0de <span class="kw">for </span>NoopNode {
-<a href=#731 id=731 data-nosnippet>731</a>        <span class="kw">async fn </span>spawn(endpoint: Endpoint, _metrics: <span class="kw-2">&amp;mut </span>Registry) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt;
-<a href=#732 id=732 data-nosnippet>732</a>        <span class="kw">where
-<a href=#733 id=733 data-nosnippet>733</a>            </span><span class="self">Self</span>: Sized,
-<a href=#734 id=734 data-nosnippet>734</a>        {
-<a href=#735 id=735 data-nosnippet>735</a>            <span class="prelude-val">Ok</span>(NoopNode {
-<a href=#736 id=736 data-nosnippet>736</a>                endpoint,
-<a href=#737 id=737 data-nosnippet>737</a>                active_event: <span class="prelude-val">None</span>,
-<a href=#738 id=738 data-nosnippet>738</a>            })
-<a href=#739 id=739 data-nosnippet>739</a>        }
-<a href=#740 id=740 data-nosnippet>740</a>    }
-<a href=#741 id=741 data-nosnippet>741</a>
-<a href=#742 id=742 data-nosnippet>742</a>    <span class="attr">#[<span class="kw">crate</span>::sim]
-<a href=#743 id=743 data-nosnippet>743</a>    </span><span class="kw">async fn </span>custom_events() -&gt; <span class="prelude-ty">Result</span>&lt;SimulationBuilder&lt;NoopNode&gt;&gt; {
-<a href=#744 id=744 data-nosnippet>744</a>        <span class="kw">async fn </span>tick(ctx: <span class="kw-2">&amp;</span>Context, node: <span class="kw-2">&amp;mut </span>NoopNode) -&gt; <span class="prelude-ty">Result</span>&lt;bool&gt; {
-<a href=#745 id=745 data-nosnippet>745</a>            <span class="kw">let </span>me = node.endpoint.node_id();
-<a href=#746 id=746 data-nosnippet>746</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>((id, other_node)) = node.active_event.take() {
-<a href=#747 id=747 data-nosnippet>747</a>                <span class="self">self</span>::events::event_end(me, other_node, <span class="string">"done"</span>, id);
-<a href=#748 id=748 data-nosnippet>748</a>            }
-<a href=#749 id=749 data-nosnippet>749</a>            <span class="kw">let </span>other = ctx
-<a href=#750 id=750 data-nosnippet>750</a>                .all_other_nodes(me)
-<a href=#751 id=751 data-nosnippet>751</a>                .choose(<span class="kw-2">&amp;mut </span>rand::thread_rng())
-<a href=#752 id=752 data-nosnippet>752</a>                .unwrap();
-<a href=#753 id=753 data-nosnippet>753</a>            <span class="kw">let </span>id = <span class="macro">format!</span>(<span class="string">"ping:n{}:r{}"</span>, ctx.node_index, ctx.round);
-<a href=#754 id=754 data-nosnippet>754</a>            <span class="self">self</span>::events::event_start(
-<a href=#755 id=755 data-nosnippet>755</a>                me.fmt_short(),
-<a href=#756 id=756 data-nosnippet>756</a>                other.node_id.fmt_short(),
-<a href=#757 id=757 data-nosnippet>757</a>                <span class="macro">format!</span>(<span class="string">"ping round {}"</span>, ctx.round),
-<a href=#758 id=758 data-nosnippet>758</a>                <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>id),
-<a href=#759 id=759 data-nosnippet>759</a>            );
-<a href=#760 id=760 data-nosnippet>760</a>            node.active_event = <span class="prelude-val">Some</span>((id, other.node_id));
-<a href=#761 id=761 data-nosnippet>761</a>            <span class="prelude-val">Ok</span>(<span class="bool-val">true</span>)
-<a href=#762 id=762 data-nosnippet>762</a>        }
-<a href=#763 id=763 data-nosnippet>763</a>
-<a href=#764 id=764 data-nosnippet>764</a>        <span class="prelude-val">Ok</span>(Simulation::builder(tick).max_rounds(<span class="number">4</span>).node_count(<span class="number">4</span>))
-<a href=#765 id=765 data-nosnippet>765</a>    }
-<a href=#766 id=766 data-nosnippet>766</a>}</code></pre></div></section></main></body></html>
+<a href=#724 id=724 data-nosnippet>724</a>    <span class="kw">impl </span>N0de <span class="kw">for </span>NoopNode {
+<a href=#725 id=725 data-nosnippet>725</a>        <span class="kw">async fn </span>spawn(endpoint: Endpoint, _metrics: <span class="kw-2">&amp;mut </span>Registry) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt;
+<a href=#726 id=726 data-nosnippet>726</a>        <span class="kw">where
+<a href=#727 id=727 data-nosnippet>727</a>            </span><span class="self">Self</span>: Sized,
+<a href=#728 id=728 data-nosnippet>728</a>        {
+<a href=#729 id=729 data-nosnippet>729</a>            <span class="prelude-val">Ok</span>(NoopNode {
+<a href=#730 id=730 data-nosnippet>730</a>                endpoint,
+<a href=#731 id=731 data-nosnippet>731</a>                active_event: <span class="prelude-val">None</span>,
+<a href=#732 id=732 data-nosnippet>732</a>            })
+<a href=#733 id=733 data-nosnippet>733</a>        }
+<a href=#734 id=734 data-nosnippet>734</a>    }
+<a href=#735 id=735 data-nosnippet>735</a>
+<a href=#736 id=736 data-nosnippet>736</a>    <span class="attr">#[<span class="kw">crate</span>::sim]
+<a href=#737 id=737 data-nosnippet>737</a>    </span><span class="kw">async fn </span>custom_events() -&gt; <span class="prelude-ty">Result</span>&lt;SimulationBuilder&lt;NoopNode&gt;&gt; {
+<a href=#738 id=738 data-nosnippet>738</a>        <span class="kw">async fn </span>tick(ctx: <span class="kw-2">&amp;</span>Context, node: <span class="kw-2">&amp;mut </span>NoopNode) -&gt; <span class="prelude-ty">Result</span>&lt;bool&gt; {
+<a href=#739 id=739 data-nosnippet>739</a>            <span class="kw">let </span>me = node.endpoint.node_id();
+<a href=#740 id=740 data-nosnippet>740</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>((id, other_node)) = node.active_event.take() {
+<a href=#741 id=741 data-nosnippet>741</a>                <span class="self">self</span>::events::event_end(me, other_node, <span class="string">"done"</span>, id);
+<a href=#742 id=742 data-nosnippet>742</a>            }
+<a href=#743 id=743 data-nosnippet>743</a>            <span class="kw">let </span>other = ctx
+<a href=#744 id=744 data-nosnippet>744</a>                .all_other_nodes(me)
+<a href=#745 id=745 data-nosnippet>745</a>                .choose(<span class="kw-2">&amp;mut </span>rand::thread_rng())
+<a href=#746 id=746 data-nosnippet>746</a>                .unwrap();
+<a href=#747 id=747 data-nosnippet>747</a>            <span class="kw">let </span>id = <span class="macro">format!</span>(<span class="string">"ping:n{}:r{}"</span>, ctx.node_index, ctx.round);
+<a href=#748 id=748 data-nosnippet>748</a>            <span class="self">self</span>::events::event_start(
+<a href=#749 id=749 data-nosnippet>749</a>                me.fmt_short(),
+<a href=#750 id=750 data-nosnippet>750</a>                other.node_id.fmt_short(),
+<a href=#751 id=751 data-nosnippet>751</a>                <span class="macro">format!</span>(<span class="string">"ping round {}"</span>, ctx.round),
+<a href=#752 id=752 data-nosnippet>752</a>                <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>id),
+<a href=#753 id=753 data-nosnippet>753</a>            );
+<a href=#754 id=754 data-nosnippet>754</a>            node.active_event = <span class="prelude-val">Some</span>((id, other.node_id));
+<a href=#755 id=755 data-nosnippet>755</a>            <span class="prelude-val">Ok</span>(<span class="bool-val">true</span>)
+<a href=#756 id=756 data-nosnippet>756</a>        }
+<a href=#757 id=757 data-nosnippet>757</a>
+<a href=#758 id=758 data-nosnippet>758</a>        <span class="prelude-val">Ok</span>(Simulation::builder(tick).max_rounds(<span class="number">4</span>).node_count(<span class="number">4</span>))
+<a href=#759 id=759 data-nosnippet>759</a>    }
+<a href=#760 id=760 data-nosnippet>760</a>}</code></pre></div></section></main></body></html>
