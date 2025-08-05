@@ -35,6 +35,28 @@ impl Spawn<SetupData> for MyNode {
     }
 }
 
+#[derive(Debug)]
+struct MyTcpServer {
+    // some non-iroh server
+}
+
+impl Node for MyTcpServer {
+    fn endpoint(&self) -> Option<&Endpoint> {
+        None
+    }
+
+    async fn shutdown(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl Spawn<SetupData> for MyTcpServer {
+    async fn spawn(_context: &mut SpawnContext<'_, SetupData>) -> Result<Self> {
+        // Do whatever
+        Ok(MyTcpServer {})
+    }
+}
+
 #[iroh_n0des::sim]
 async fn test_simulation() -> Result<Builder<SetupData>> {
     async fn round(_node: &mut MyNode, context: &RoundContext<'_, SetupData>) -> Result<bool> {
@@ -49,8 +71,18 @@ async fn test_simulation() -> Result<Builder<SetupData>> {
         Ok(())
     }
 
+    async fn tcp_server_round(
+        _node: &mut MyTcpServer,
+        _context: &RoundContext<'_, SetupData>,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+
     Ok(
         Builder::with_setup(async || Ok(SetupData { shared_secret: 42 }))
+            // spawn 1 instance of MyTcpServer
+            .spawn(1, MyTcpServer::builder(tcp_server_round))
+            // spawn 4 instances of MyNode
             .spawn(4, MyNode::builder(round).check(check))
             .rounds(3),
     )
