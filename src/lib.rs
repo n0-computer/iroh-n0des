@@ -29,3 +29,11 @@ pub use self::{
     client::{Client, ClientBuilder},
     protocol::ALPN,
 };
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn smoke() {
+        assert!(true, "it works")
+    }
+}

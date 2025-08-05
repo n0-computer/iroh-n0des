@@ -117,8 +117,8 @@ pub struct StartTrace {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StartTraceResponse {
-    trace_id: Uuid,
-    user_data: Option<Bytes>,
+    pub trace_id: Uuid,
+    pub user_data: Option<Bytes>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -450,7 +450,7 @@ struct LocalActor {
 struct TraceState {
     init: InitTrace,
     nodes: Vec<NodeInfoWithAddr>,
-    barrier_start: Vec<irpc::channel::oneshot::Sender<RemoteResult<WaitStartResponse>>>,
+    barrier_start: Vec<oneshot::Sender<RemoteResult<WaitStartResponse>>>,
     barrier_checkpoint: BTreeMap<CheckpointId, Arc<Barrier>>,
 }
 
@@ -553,6 +553,6 @@ impl LocalActor {
     }
 }
 
-async fn send_err<T>(tx: irpc::channel::oneshot::Sender<RemoteResult<T>>, err: RemoteError) {
+async fn send_err<T>(tx: oneshot::Sender<RemoteResult<T>>, err: RemoteError) {
     tx.send(Err(err)).await.ok();
 }
