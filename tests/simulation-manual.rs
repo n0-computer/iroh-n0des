@@ -3,10 +3,11 @@ mod tests {
     use std::time::Duration;
 
     use anyhow::Result;
-    use iroh_n0des::iroh::Endpoint;
+    use iroh_n0des::{
+        iroh::Endpoint,
+        simulation::{Builder, Node, RoundContext, Spawn, SpawnContext},
+    };
     use serde::{Deserialize, Serialize};
-
-    use iroh_n0des::simulation::{Builder, Node, RoundContext, Spawn, SpawnContext};
 
     #[derive(Debug, Serialize, Deserialize, Clone)]
     struct Data {

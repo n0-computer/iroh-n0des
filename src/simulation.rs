@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-#[cfg(feature = "iroh_main")]
+#[cfg(not(feature = "iroh_v035"))]
 use iroh::Watcher;
 use iroh_metrics::encoding::Encoder;
 use iroh_n0des::{
@@ -146,7 +146,7 @@ impl<'a, D> RoundContext<'a, D> {
     }
 
     pub fn self_addr(&self) -> &NodeAddr {
-        if let Some(ref addr) = self
+        if let Some(addr) = self
             .all_nodes
             .iter()
             .find(|n| n.info.idx == self.node_index)
@@ -448,7 +448,7 @@ impl<D: UserData> SimNode<D> {
     async fn my_addr(&self) -> NodeAddr {
         let mut addr = NodeAddr::new(self.node_id());
         if let Some(endpoint) = self.node.endpoint() {
-            addr = node_addr(&endpoint).await;
+            addr = node_addr(endpoint).await;
         }
         addr
     }
@@ -467,6 +467,12 @@ async fn node_addr(endpoint: &Endpoint) -> NodeAddr {
         endpoint.node_addr().initialized().await
     };
     addr
+}
+
+impl Default for Builder<()> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Builder<()> {

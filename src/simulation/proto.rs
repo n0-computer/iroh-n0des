@@ -234,7 +234,7 @@ impl TraceClient {
     }
 
     pub fn from_env_or_local() -> Result<Self> {
-        Ok(Self::from_env()?.unwrap_or_else(|| Self::local()))
+        Ok(Self::from_env()?.unwrap_or_else(Self::local))
     }
 
     pub fn local() -> Self {

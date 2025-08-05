@@ -10,9 +10,8 @@ use tracing_subscriber::{
     util::{SubscriberInitExt, TryInitError},
 };
 
-use crate::simulation::ENV_TRACE_SERVER;
-
 use super::proto::ActiveTrace;
+use crate::simulation::ENV_TRACE_SERVER;
 
 const ENV_RUST_LOG: &str = "RUST_LOG";
 const ENV_SIM_LOG: &str = "SIM_LOG";

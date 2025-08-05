@@ -2,18 +2,16 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use iroh_metrics::Counter;
-use rand::seq::IteratorRandom;
-use tracing::{debug, instrument};
-
-use iroh_n0des::simulation::*;
 use iroh_n0des::{
     iroh::{
         Endpoint, NodeAddr,
         endpoint::Connection,
         protocol::{ProtocolHandler, Router},
     },
-    simulation::proto::TraceClient,
+    simulation::{proto::TraceClient, *},
 };
+use rand::seq::IteratorRandom;
+use tracing::{debug, instrument};
 
 const ALPN: &[u8] = b"iroh-n0des/test/ping/0";
 

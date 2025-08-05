@@ -1,8 +1,9 @@
 use anyhow::Result;
+use iroh_n0des::{
+    iroh::{Endpoint, protocol::Router},
+    simulation::*,
+};
 use serde::{Deserialize, Serialize};
-
-use iroh_n0des::iroh::{Endpoint, protocol::Router};
-use iroh_n0des::simulation::*;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct SetupData {
