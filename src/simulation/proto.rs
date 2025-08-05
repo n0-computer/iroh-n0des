@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
+use std::{collections::BTreeMap, net::SocketAddr};
 
 use anyhow::Result;
 use bytes::Bytes;
@@ -6,9 +6,9 @@ use iroh_metrics::encoding::Update;
 use irpc::{WithChannels, channel::oneshot, rpc_requests, util::make_insecure_client_endpoint};
 #[cfg(feature = "iroh_main")]
 use irpc_iroh::IrohRemoteConnection;
+use n0_future::{IterExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime as DateTime;
-use tokio::sync::Barrier;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -23,8 +23,8 @@ pub type RemoteResult<T> = Result<T, RemoteError>;
 pub enum RemoteError {
     #[error("{0}")]
     Other(String),
-    #[error("Trace not found ({0})")]
-    TraceNotFound(Uuid),
+    #[error("Trace not found")]
+    TraceNotFound,
 }
 
 impl RemoteError {
@@ -47,10 +47,14 @@ pub enum TraceProtocol {
     GetSession(GetSession),
     #[rpc(tx=oneshot::Sender<RemoteResult<Uuid>>)]
     InitTrace(InitTrace),
-    #[rpc(tx=oneshot::Sender<RemoteResult<StartTraceResponse>>)]
-    StartTrace(StartTrace),
+    #[rpc(tx=oneshot::Sender<RemoteResult<GetTraceResponse>>)]
+    GetTrace(GetTrace),
+    #[rpc(tx=oneshot::Sender<RemoteResult<StartNodeResponse>>)]
+    StartNode(StartNode),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
-    EndTrace(EndTrace),
+    EndNode(EndNode),
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    CloseTrace(CloseTrace),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     PutCheckpoint(PutCheckpoint),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
@@ -86,7 +90,15 @@ pub struct InitTrace {
     pub info: TraceInfo,
     #[serde(with = "time::serde::rfc3339")]
     pub start_time: DateTime,
-    pub user_data: Option<Bytes>,
+    pub setup_data: Option<Bytes>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CloseTrace {
+    pub trace_id: Uuid,
+    #[serde(with = "time::serde::rfc3339")]
+    pub end_time: DateTime,
+    pub result: Result<(), String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -107,33 +119,30 @@ impl TraceInfo {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct StartTrace {
+pub struct GetTrace {
     pub session_id: Uuid,
     pub name: String,
-    pub scope_info: ScopeInfo,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GetTraceResponse {
+    pub trace_id: Uuid,
+    pub info: TraceInfo,
+    pub setup_data: Option<Bytes>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StartNode {
+    pub trace_id: Uuid,
+    pub node_info: NodeInfo,
     #[serde(with = "time::serde::rfc3339")]
     pub start_time: DateTime,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct StartTraceResponse {
-    pub trace_id: Uuid,
-    pub user_data: Option<Bytes>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum ScopeInfo {
-    Integrated(Vec<NodeInfo>),
-    Isolated(NodeInfo),
-}
-
-impl From<&ScopeInfo> for Scope {
-    fn from(value: &ScopeInfo) -> Self {
-        match value {
-            ScopeInfo::Integrated(_) => Scope::Integrated,
-            ScopeInfo::Isolated(info) => Scope::Isolated(info.idx),
-        }
-    }
+pub struct StartNodeResponse {
+    // pub trace_id: Uuid,
+    // pub setup_data: Option<Bytes>,
 }
 
 pub type NodeIdx = u32;
@@ -145,9 +154,9 @@ pub enum Scope {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct EndTrace {
-    pub scope: Scope,
+pub struct EndNode {
     pub trace_id: Uuid,
+    pub node_idx: NodeIdx,
     #[serde(with = "time::serde::rfc3339")]
     pub end_time: DateTime,
     pub result: Result<(), String>,
@@ -155,15 +164,25 @@ pub struct EndTrace {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeInfo {
-    pub node_id: NodeId,
-    pub idx: u32,
+    pub idx: NodeIdx,
+    pub node_id: Option<NodeId>,
     pub label: Option<String>,
+}
+
+impl NodeInfo {
+    pub fn new_empty(idx: NodeIdx) -> Self {
+        Self {
+            idx,
+            node_id: None,
+            label: None,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeInfoWithAddr {
     pub info: NodeInfo,
-    pub addr: NodeAddr,
+    pub addr: Option<NodeAddr>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -281,14 +300,13 @@ impl TraceClient {
 
     pub async fn init_and_start_trace(&self, name: &str) -> Result<ActiveTrace> {
         let trace_info = TraceInfo::new(name, 1);
-        self.init_trace(trace_info, None).await?;
-        let (client, _data) = self
-            .start_trace(name.to_string(), ScopeInfo::Integrated(Default::default()))
-            .await?;
+        let trace_id = self.init_trace(trace_info, None).await?;
+        let node_info = NodeInfo::new_empty(0);
+        let client = self.start_node(trace_id, node_info).await?;
         Ok(client)
     }
 
-    pub async fn init_trace(&self, info: TraceInfo, user_data: Option<Bytes>) -> Result<()> {
+    pub async fn init_trace(&self, info: TraceInfo, setup_data: Option<Bytes>) -> Result<Uuid> {
         debug!("init trace {info:?}");
         let trace_id = self
             .client
@@ -296,10 +314,37 @@ impl TraceClient {
                 info,
                 session_id: self.session_id,
                 start_time: DateTime::now_utc(),
-                user_data,
+                setup_data,
             })
             .await??;
         debug!("init trace {trace_id}: OK");
+        Ok(trace_id)
+    }
+
+    pub async fn get_trace(&self, name: String) -> Result<GetTraceResponse> {
+        debug!("get trace {name}");
+        let data = self
+            .client
+            .rpc(GetTrace {
+                session_id: self.session_id,
+                name,
+            })
+            .await??;
+        debug!(?data, "get trace: OK");
+        Ok(data)
+    }
+
+    pub async fn close_trace(&self, trace_id: Uuid, result: Result<(), String>) -> Result<()> {
+        let end_time = DateTime::now_utc();
+        debug!(%trace_id, ?result, "close trace");
+        self.client
+            .rpc(CloseTrace {
+                trace_id,
+                end_time,
+                result,
+            })
+            .await??;
+        debug!(%trace_id, "close trace: OK");
         Ok(())
     }
 
@@ -308,36 +353,41 @@ impl TraceClient {
         Ok(res)
     }
 
-    pub async fn start_trace(
+    pub async fn put_logs(
         &self,
-        name: String,
-        scope_info: ScopeInfo,
-    ) -> Result<(ActiveTrace, Option<Bytes>)> {
+        trace_id: Uuid,
+        scope: Scope,
+        json_lines: Vec<String>,
+    ) -> Result<()> {
+        self.client
+            .rpc(PutLogs {
+                scope,
+                trace_id,
+                json_lines,
+            })
+            .await??;
+        Ok(())
+    }
+
+    pub async fn start_node(&self, trace_id: Uuid, node_info: NodeInfo) -> Result<ActiveTrace> {
         let start_time = DateTime::now_utc();
-        debug!("start trace {name}");
-        let scope = Scope::from(&scope_info);
+        let node_idx = node_info.idx;
+        debug!(%trace_id, node_idx, "start node");
         let res = self
             .client
-            .rpc(StartTrace {
-                session_id: self.session_id,
-                name,
-                scope_info,
+            .rpc(StartNode {
+                trace_id,
+                node_info,
                 start_time,
             })
             .await??;
-        let StartTraceResponse {
+        let StartNodeResponse {} = res;
+        debug!(%trace_id, node_idx, "start node: OK");
+        Ok(ActiveTrace {
+            client: self.client.clone(),
             trace_id,
-            user_data,
-        } = res;
-        debug!("start trace {trace_id}: OK");
-        Ok((
-            ActiveTrace {
-                client: self.client.clone(),
-                trace_id,
-                scope,
-            },
-            user_data,
-        ))
+            node_idx,
+        })
     }
 }
 
@@ -345,23 +395,23 @@ impl TraceClient {
 pub struct ActiveTrace {
     client: irpc::Client<TraceProtocol>,
     trace_id: Uuid,
-    scope: Scope,
+    node_idx: u32,
 }
 
 impl ActiveTrace {
     pub async fn put_checkpoint(
         &self,
         id: CheckpointId,
-        node_idx: NodeIdx,
         label: Option<String>,
         result: Result<(), String>,
     ) -> Result<()> {
+        debug!(id, "put checkpoint");
         let time = DateTime::now_utc();
         self.client
             .rpc(PutCheckpoint {
                 trace_id: self.trace_id,
                 checkpoint_id: id,
-                node_idx,
+                node_idx: self.node_idx,
                 time,
                 label,
                 result,
@@ -377,6 +427,7 @@ impl ActiveTrace {
         metrics: Update,
     ) -> Result<()> {
         let time = DateTime::now_utc();
+        debug!(count = metrics.values.items.len(), "put metrics");
         self.client
             .rpc(PutMetrics {
                 trace_id: self.trace_id,
@@ -392,7 +443,7 @@ impl ActiveTrace {
     pub async fn put_logs(&self, json_lines: Vec<String>) -> Result<()> {
         self.client
             .rpc(PutLogs {
-                scope: self.scope,
+                scope: Scope::Isolated(self.node_idx),
                 trace_id: self.trace_id,
                 json_lines,
             })
@@ -401,7 +452,7 @@ impl ActiveTrace {
     }
 
     pub async fn wait_start(&self, info: NodeInfoWithAddr) -> Result<Vec<NodeInfoWithAddr>> {
-        debug!("waiting for all nodes to confirm start...");
+        debug!("waiting for start...");
         let res = self
             .client
             .rpc(WaitStart {
@@ -414,7 +465,7 @@ impl ActiveTrace {
     }
 
     pub async fn wait_checkpoint(&self, checkpoint_id: CheckpointId) -> Result<()> {
-        debug!("waiting for all nodes to confirm checkpoint {checkpoint_id}...");
+        debug!(?checkpoint_id, "waiting for checkpoint...");
         let res = self
             .client
             .rpc(WaitCheckpoint {
@@ -423,16 +474,17 @@ impl ActiveTrace {
             })
             .await;
         res??;
-        debug!("checkpoint {checkpoint_id} confirmed");
+        debug!(?checkpoint_id, "checkpoint confirmed");
         Ok(())
     }
 
-    pub async fn end_trace(&self, result: Result<(), String>) -> Result<()> {
+    pub async fn end(&self, result: Result<(), String>) -> Result<()> {
+        debug!("end node");
         let end_time = DateTime::now_utc();
         self.client
-            .rpc(EndTrace {
+            .rpc(EndNode {
                 trace_id: self.trace_id,
-                scope: self.scope,
+                node_idx: self.node_idx,
                 end_time,
                 result,
             })
@@ -451,9 +503,14 @@ struct TraceState {
     init: InitTrace,
     nodes: Vec<NodeInfoWithAddr>,
     barrier_start: Vec<oneshot::Sender<RemoteResult<WaitStartResponse>>>,
-    barrier_checkpoint: BTreeMap<CheckpointId, Arc<Barrier>>,
+    barrier_checkpoint: BTreeMap<CheckpointId, Vec<oneshot::Sender<RemoteResult<()>>>>,
 }
 
+impl TraceState {
+    fn node_count(&self) -> usize {
+        self.init.info.node_count as usize
+    }
+}
 impl LocalActor {
     pub fn spawn(rx: tokio::sync::mpsc::Receiver<TraceMessage>) {
         let actor = Self::default();
@@ -486,23 +543,40 @@ impl LocalActor {
                 );
                 tx.send(Ok(uuid)).await.ok();
             }
-            TraceMessage::StartTrace(msg) => {
+            TraceMessage::GetTrace(msg) => {
                 let WithChannels { inner, tx, .. } = msg;
+                let GetTrace {
+                    session_id: _,
+                    name,
+                } = inner;
                 let Some((trace_id, info)) = self
                     .traces_by_name
-                    .get(&inner.name)
+                    .get(&name)
                     .and_then(|trace_id| self.traces.get_key_value(trace_id))
                 else {
                     return send_err(tx, RemoteError::other("Trace not initialized")).await;
                 };
-                tx.send(Ok(StartTraceResponse {
+                tx.send(Ok(GetTraceResponse {
                     trace_id: *trace_id,
-                    user_data: info.init.user_data.clone(),
+                    info: info.init.info.clone(),
+                    setup_data: info.init.setup_data.clone(),
                 }))
                 .await
                 .ok();
             }
-            TraceMessage::EndTrace(msg) => {
+            TraceMessage::StartNode(msg) => {
+                let WithChannels { inner, tx, .. } = msg;
+                if self.traces.contains_key(&inner.trace_id) {
+                    tx.send(Ok(StartNodeResponse {})).await.ok();
+                } else {
+                    send_err(tx, RemoteError::other("Trace not initialized")).await;
+                }
+            }
+            TraceMessage::EndNode(msg) => {
+                // noop
+                msg.tx.send(Ok(())).await.ok();
+            }
+            TraceMessage::CloseTrace(msg) => {
                 // noop
                 msg.tx.send(Ok(())).await.ok();
             }
@@ -521,22 +595,29 @@ impl LocalActor {
             TraceMessage::WaitCheckpoint(msg) => {
                 let WithChannels { inner, tx, .. } = msg;
                 let Some(trace) = self.traces.get_mut(&inner.trace_id) else {
-                    return send_err(tx, RemoteError::TraceNotFound(inner.trace_id)).await;
+                    return send_err(tx, RemoteError::TraceNotFound).await;
                 };
+                let node_count = trace.node_count();
                 let barrier = trace
                     .barrier_checkpoint
                     .entry(inner.checkpoint_id)
-                    .or_insert_with(|| Arc::new(Barrier::new(trace.init.info.node_count as usize)))
-                    .clone();
-                tokio::task::spawn(async move {
-                    barrier.wait().await;
-                    tx.send(Ok(())).await.ok();
-                });
+                    .or_default();
+                barrier.push(tx);
+                debug!(trace_id=%inner.trace_id, checkpoint=inner.checkpoint_id, count=barrier.len(), total=node_count, "wait checkpoint");
+                if barrier.len() == node_count {
+                    debug!(trace_id=%inner.trace_id, checkpoint=inner.checkpoint_id, "release");
+                    barrier
+                        .drain(..)
+                        .map(|tx| tx.send(Ok(())))
+                        .into_unordered_stream()
+                        .count()
+                        .await;
+                }
             }
             TraceMessage::WaitStart(msg) => {
                 let WithChannels { inner, tx, .. } = msg;
                 let Some(trace) = self.traces.get_mut(&inner.trace_id) else {
-                    return send_err(tx, RemoteError::TraceNotFound(inner.trace_id)).await;
+                    return send_err(tx, RemoteError::TraceNotFound).await;
                 };
                 trace.nodes.push(inner.info);
                 trace.barrier_start.push(tx);

@@ -121,10 +121,10 @@ mod tests {
     }
 
     #[iroh_n0des::sim]
-    async fn test_simulation() -> Result<Builder<()>> {
+    async fn test_simulation_ping() -> Result<Builder<()>> {
         const EVENT_ID: &str = "ping";
         async fn tick(node: &mut PingNode, ctx: &RoundContext<'_>) -> Result<bool> {
-            let me = ctx.self_addr().node_id;
+            let me = ctx.try_self_addr()?.node_id;
 
             let target = ctx
                 .all_other_nodes(me)
@@ -205,45 +205,3 @@ mod tests {
             .rounds(1))
     }
 }
-
-// #[derive(Debug, Clone)]
-// struct NoopNode {
-//     endpoint: Endpoint,
-//     active_event: Option<(String, NodeId)>,
-// }
-// impl Node for NoopNode {
-//     async fn spawn(endpoint: Endpoint, _metrics: &mut Registry) -> Result<Self>
-//     where
-//         Self: Sized,
-//     {
-//         Ok(NoopNode {
-//             endpoint,
-//             active_event: None,
-//         })
-//     }
-// }
-
-// #[crate::sim]
-// async fn custom_events() -> Result<SimulationBuilder<NoopNode>> {
-//     async fn tick(ctx: &Context, node: &mut NoopNode) -> Result<bool> {
-//         let me = node.endpoint.node_id();
-//         if let Some((id, other_node)) = node.active_event.take() {
-//             self::events::event_end(me, other_node, "done", id);
-//         }
-//         let other = ctx
-//             .all_other_nodes(me)
-//             .choose(&mut rand::thread_rng())
-//             .unwrap();
-//         let id = format!("ping:n{}:r{}", ctx.node_index, ctx.round);
-//         self::events::event_start(
-//             me.fmt_short(),
-//             other.node_id.fmt_short(),
-//             format!("ping round {}", ctx.round),
-//             Some(&id),
-//         );
-//         node.active_event = Some((id, other.node_id));
-//         Ok(true)
-//     }
-
-//     Ok(Simulation::builder(tick).max_rounds(4).node_count(4))
-// }

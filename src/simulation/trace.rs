@@ -63,6 +63,11 @@ pub async fn submit_logs(client: &ActiveTrace) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub async fn get_logs() -> Vec<String> {
+    let writer = global_writer();
+    writer.get().await
+}
+
 /// A tracing writer that interacts well with test output capture.
 ///
 /// Using this writer will make sure that the output is captured normally and only printed
@@ -101,22 +106,24 @@ impl LineWriter {
         self.buf.lock().expect("lock poisoned").clear();
     }
 
+    pub async fn get(&self) -> Vec<String> {
+        let mut buf = self.buf.lock().expect("lock poisoned");
+        let lines = buf
+            .lines()
+            .filter_map(|line| match line {
+                Ok(line) => Some(line),
+                Err(err) => {
+                    tracing::warn!("Skipping invalid log line: {err:?}");
+                    None
+                }
+            })
+            .collect();
+        buf.clear();
+        lines
+    }
+
     pub async fn submit(&self, client: &ActiveTrace) -> anyhow::Result<()> {
-        let lines = {
-            let mut buf = self.buf.lock().expect("lock poisoned");
-            let lines = buf
-                .lines()
-                .filter_map(|line| match line {
-                    Ok(line) => Some(line),
-                    Err(err) => {
-                        tracing::warn!("Skipping invalid log line: {err:?}");
-                        None
-                    }
-                })
-                .collect();
-            buf.clear();
-            lines
-        };
+        let lines = self.get().await;
         client.put_logs(lines).await?;
         Ok(())
     }

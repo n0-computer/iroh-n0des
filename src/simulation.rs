@@ -3,6 +3,7 @@ use std::{
     marker::PhantomData,
     pin::Pin,
     sync::{Arc, RwLock},
+    time::Duration,
 };
 
 use anyhow::{Context, Result};
@@ -13,13 +14,15 @@ use iroh_metrics::encoding::Encoder;
 use iroh_n0des::{
     Registry,
     iroh::{Endpoint, NodeAddr, NodeId, SecretKey},
-    simulation::proto::{ActiveTrace, NodeInfo, ScopeInfo, TraceClient, TraceInfo},
+    simulation::proto::{ActiveTrace, NodeInfo, TraceClient, TraceInfo},
 };
 use n0_future::IterExt;
-use proto::NodeInfoWithAddr;
+use proto::{GetTraceResponse, NodeInfoWithAddr, Scope};
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::sync::Semaphore;
-use tracing::info;
+use tokio_util::sync::CancellationToken;
+use tracing::{Instrument, debug, error_span, info, warn};
+use uuid::Uuid;
 
 pub mod events;
 pub mod proto;
@@ -91,7 +94,7 @@ impl<T> UserData for T where
 pub struct SpawnContext<'a, D = ()> {
     secret_key: SecretKey,
     node_index: u32,
-    data: &'a D,
+    setup_data: &'a D,
     registry: &'a mut Registry,
 }
 
@@ -102,8 +105,8 @@ impl<'a, D: UserData> SpawnContext<'a, D> {
     }
 
     /// Returns a reference to the setup data for this simulation.
-    pub fn user_data(&self) -> &D {
-        self.data
+    pub fn setup_data(&self) -> &D {
+        self.setup_data
     }
 
     /// Returns a mutable reference to a metrics registry.
@@ -145,7 +148,7 @@ impl<'a, D: UserData> SpawnContext<'a, D> {
 pub struct RoundContext<'a, D = ()> {
     round: u32,
     node_index: u32,
-    data: &'a D,
+    setup_data: &'a D,
     all_nodes: &'a Vec<NodeInfoWithAddr>,
 }
 
@@ -161,16 +164,16 @@ impl<'a, D> RoundContext<'a, D> {
     }
 
     /// Returns a reference to the shared setup data for this simulation.
-    pub fn user_data(&self) -> &D {
-        self.data
+    pub fn setup_data(&self) -> &D {
+        self.setup_data
     }
 
     /// Returns an iterator over the addresses of all nodes except the specified one.
     pub fn all_other_nodes(&self, me: NodeId) -> impl Iterator<Item = &NodeAddr> + '_ {
         self.all_nodes
             .iter()
-            .filter(move |n| n.info.node_id != me)
-            .map(|n| &n.addr)
+            .filter(move |n| n.info.node_id != Some(me))
+            .flat_map(|n| &n.addr)
     }
 
     /// Returns the address of the node with the given index.
@@ -179,30 +182,25 @@ impl<'a, D> RoundContext<'a, D> {
     ///
     /// Returns an error if no node with the specified index exists.
     pub fn addr(&self, idx: u32) -> Result<NodeAddr> {
-        Ok(self
-            .all_nodes
+        self.all_nodes
             .iter()
             .find(|n| n.info.idx == idx)
             .cloned()
             .context("node not found")?
-            .addr)
+            .addr
+            .context("node has no address")
     }
 
     /// Returns the address of this node.
-    ///
-    /// # Panics
-    ///
-    /// Panics if this node's address is not found in the node list.
-    pub fn self_addr(&self) -> &NodeAddr {
-        if let Some(addr) = self
-            .all_nodes
+    pub fn self_addr(&self) -> Option<&NodeAddr> {
+        self.all_nodes
             .iter()
             .find(|n| n.info.idx == self.node_index)
-        {
-            &addr.addr
-        } else {
-            panic!("expected self address to be present")
-        }
+            .and_then(|info| info.addr.as_ref())
+    }
+
+    pub fn try_self_addr(&self) -> Result<&NodeAddr> {
+        self.self_addr().context("missing node address")
     }
 
     /// Returns the total number of nodes participating in the simulation.
@@ -253,20 +251,6 @@ pub trait Spawn<D: UserData = ()>: Node + 'static {
         NodeBuilder::new(round_fn)
     }
 }
-
-// impl<F, N: Node, D> Spawn<D> for F
-// where
-//     F: Fn(Endpoint, SpawnContext<'_, D>) -> N,
-// {
-//     type Node = N;
-
-//     async fn spawn(endpoint: Endpoint, context: SpawnContext<'_, D>) -> Result<Self::Node>
-//     where
-//         Self: Sized,
-//     {
-//         F(endpoint, context).await
-//     }
-// }
 
 /// Trait for simulation node implementations.
 ///
@@ -442,6 +426,7 @@ impl<N: Spawn<D>, D: UserData> NodeBuilder<N, D> {
 
 struct SimNode<D> {
     node: BoxNode,
+    trace_id: Uuid,
     idx: u32,
     round_fn: BoxedRoundFn<D>,
     check_fn: Option<BoxedCheckFn<D>>,
@@ -452,34 +437,28 @@ struct SimNode<D> {
 }
 
 impl<D: UserData> SimNode<D> {
-    // async fn spawn_and_run(
-    //     spawner: NodeBuilder<D>,
-    //     name: String,
-    //     node_index: u32,
-    //     data: &D,
-    //     client: Option<TraceClient>,
-    //     rounds: u32,
-    // ) -> Result<()> {
-    //     let mut node = Self::spawn(spawner, node_index, data).await?;
-    //     let scope = ScopeInfo::Isolated(node.info.clone());
-    //     let client = match client {
-    //         Some(client) => Some(client.start_trace(name, scope).await?),
-    //         None => None,
-    //     };
-    //     node.run(client.as_ref(), data, rounds).await?;
-    //     Ok(())
-    // }
-
-    async fn spawn(builder: ErasedNodeBuilder<D>, node_index: u32, data: &D) -> Result<Self> {
-        info!(idx = node_index, "run start");
+    async fn spawn_and_run(
+        builder: ErasedNodeBuilder<D>,
+        client: TraceClient,
+        trace_id: Uuid,
+        node_index: u32,
+        setup_data: &D,
+        rounds: u32,
+    ) -> Result<()> {
+        let secret_key = SecretKey::generate(&mut rand::rngs::OsRng);
+        let info = NodeInfo {
+            // TODO: Only assign node id if endpoint was created.
+            node_id: Some(secret_key.public()),
+            idx: node_index,
+            label: None,
+        };
         let mut registry = Registry::default();
         let mut context = SpawnContext {
-            data,
+            setup_data,
             node_index,
-            secret_key: SecretKey::generate(&mut rand::rngs::OsRng),
+            secret_key,
             registry: &mut registry,
         };
-        let node_id = context.node_id();
         let node = (builder.spawn_fn)(&mut context).await?;
 
         // TODO(Frando): enable metrics support for iroh 0.35
@@ -491,13 +470,9 @@ impl<D: UserData> SimNode<D> {
             registry.register_all(endpoint.metrics());
         }
 
-        let info = NodeInfo {
-            node_id,
-            idx: node_index,
-            label: None,
-        };
-        Ok(Self {
+        let mut node = Self {
             node,
+            trace_id,
             idx: node_index,
             info,
             round: 0,
@@ -505,11 +480,19 @@ impl<D: UserData> SimNode<D> {
             check_fn: builder.check_fn,
             metrics_encoder: Encoder::new(Arc::new(RwLock::new(registry))),
             all_nodes: Default::default(),
-        })
+        };
+
+        let res = node.run(&client, setup_data, rounds).await;
+        if let Err(err) = &res {
+            warn!("node failed: {err:#}");
+        }
+        res
     }
 
-    async fn run(&mut self, client: &ActiveTrace, data: &D, rounds: u32) -> Result<()> {
-        info!(idx = self.idx, "run");
+    async fn run(&mut self, client: &TraceClient, setup_data: &D, rounds: u32) -> Result<()> {
+        let client = client.start_node(self.trace_id, self.info.clone()).await?;
+
+        info!(idx = self.idx, "start");
 
         let info = NodeInfoWithAddr {
             addr: self.my_addr().await,
@@ -518,29 +501,43 @@ impl<D: UserData> SimNode<D> {
         let all_nodes = client.wait_start(info).await?;
         self.all_nodes = all_nodes;
 
-        let result = self.run_rounds(client, data, rounds).await;
+        let result = self.run_rounds(&client, setup_data, rounds).await;
 
-        client.end_trace(to_str_err(&result)).await.ok();
+        if let Err(err) = self.node.shutdown().await {
+            warn!("failure during node shutdown: {err:#}");
+        }
+
+        client.end(to_str_err(&result)).await?;
 
         result
     }
 
-    async fn run_rounds(&mut self, client: &ActiveTrace, data: &D, rounds: u32) -> Result<()> {
+    async fn run_rounds(
+        &mut self,
+        client: &ActiveTrace,
+        setup_data: &D,
+        rounds: u32,
+    ) -> Result<()> {
         while self.round < rounds {
-            self.run_round(client, data)
+            if !self
+                .run_round(client, setup_data)
                 .await
-                .with_context(|| format!("failed at round {}", self.round))?;
+                .with_context(|| format!("failed at round {}", self.round))?
+            {
+                return Ok(());
+            }
             self.round += 1;
         }
         Ok(())
     }
 
-    async fn run_round(&mut self, client: &ActiveTrace, data: &D) -> Result<()> {
-        info!(idx = self.idx, "run");
+    #[tracing::instrument(name="round", skip_all, fields(round=self.round))]
+    async fn run_round(&mut self, client: &ActiveTrace, setup_data: &D) -> Result<bool> {
+        info!("start round");
         let context = RoundContext {
             round: self.round,
             node_index: self.idx,
-            data,
+            setup_data,
             all_nodes: &self.all_nodes,
         };
 
@@ -549,15 +546,15 @@ impl<D: UserData> SimNode<D> {
         let checkpoint = (context.round + 1) as u64;
         let label = format!("Round {} end", context.round);
         client
-            .put_checkpoint(checkpoint, self.idx, Some(label), to_str_err(&result))
+            .put_checkpoint(checkpoint, Some(label), to_str_err(&result))
             .await?;
-        client
-            .put_metrics(
-                self.node_id(),
-                Some(checkpoint),
-                self.metrics_encoder.export(),
-            )
-            .await?;
+
+        // TODO(Frando): Couple metrics to node idx, not node id.
+        if let Some(node_id) = self.node_id() {
+            client
+                .put_metrics(node_id, Some(checkpoint), self.metrics_encoder.export())
+                .await?;
+        }
 
         client.wait_checkpoint(checkpoint).await?;
 
@@ -565,19 +562,21 @@ impl<D: UserData> SimNode<D> {
             (check_fn)(&self.node, &context).with_context(|| "check function failed")?;
         }
 
-        result.map(|_| ())
+        info!("end round");
+
+        result
     }
 
-    fn node_id(&self) -> NodeId {
+    fn node_id(&self) -> Option<NodeId> {
         self.info.node_id
     }
 
-    async fn my_addr(&self) -> NodeAddr {
-        let mut addr = NodeAddr::new(self.node_id());
+    async fn my_addr(&self) -> Option<NodeAddr> {
         if let Some(endpoint) = self.node.endpoint() {
-            addr = node_addr(endpoint).await;
+            Some(node_addr(endpoint).await)
+        } else {
+            None
         }
-        addr
     }
 }
 
@@ -649,8 +648,8 @@ impl<D: UserData> Builder<D> {
         node_count: u32,
         node_builder: impl Into<NodeBuilder<N, D>>,
     ) -> Self {
-        self.spawners
-            .push((node_count, node_builder.into().erase()));
+        let node_builder = node_builder.into();
+        self.spawners.push((node_count, node_builder.erase()));
         self
     }
 
@@ -666,25 +665,40 @@ impl<D: UserData> Builder<D> {
     pub async fn build(self, name: &str) -> Result<Simulation<D>> {
         let client = TraceClient::from_env_or_local()?;
         let run_mode = RunMode::from_env()?;
-        let name = name.to_string();
 
-        let node_count = self.spawners.iter().map(|(count, _spawner)| count).sum();
+        debug!(%name, ?run_mode, "build simulation run");
 
-        let data = (self.setup_fn)().await?;
-
-        if matches!(run_mode, RunMode::InitOnly | RunMode::Integrated) {
-            let user_data = Bytes::from(postcard::to_stdvec(&data)?);
-            client
+        let (trace_id, setup_data) = if matches!(run_mode, RunMode::InitOnly | RunMode::Integrated)
+        {
+            let setup_data = (self.setup_fn)().await?;
+            let encoded_setup_data = Bytes::from(postcard::to_stdvec(&setup_data)?);
+            let node_count = self.spawners.iter().map(|(count, _spawner)| count).sum();
+            let trace_id = client
                 .init_trace(
                     TraceInfo {
-                        name: name.clone(),
+                        name: name.to_string(),
                         node_count,
                         expected_checkpoints: Some(self.rounds as u64),
                     },
-                    Some(user_data),
+                    Some(encoded_setup_data),
                 )
                 .await?;
-        }
+            info!(%name, node_count, %trace_id, "init simulation");
+
+            (trace_id, setup_data)
+        } else {
+            let info = client.get_trace(name.to_string()).await?;
+            let GetTraceResponse {
+                trace_id,
+                info,
+                setup_data,
+            } = info;
+            info!(%name, node_count=info.node_count, %trace_id, "get simulation");
+            let setup_data = setup_data.context("expected setup data to be set")?;
+            let setup_data: D =
+                postcard::from_bytes(&setup_data).context("failed to decode user data")?;
+            (trace_id, setup_data)
+        };
 
         let mut spawners = self
             .spawners
@@ -704,11 +718,12 @@ impl<D: UserData> Builder<D> {
         };
 
         Ok(Simulation {
-            name: name.to_string(),
-            data,
+            run_mode,
             max_rounds: self.rounds,
-            spawners,
+            node_builders: spawners,
             client,
+            trace_id,
+            setup_data,
         })
     }
 }
@@ -718,11 +733,12 @@ impl<D: UserData> Builder<D> {
 /// Contains all the necessary components including user data, node spawners,
 /// and tracing client to execute a simulation run.
 pub struct Simulation<D> {
-    name: String,
-    data: D,
-    max_rounds: u32,
-    spawners: Vec<(u32, ErasedNodeBuilder<D>)>,
+    trace_id: Uuid,
+    run_mode: RunMode,
     client: TraceClient,
+    setup_data: D,
+    max_rounds: u32,
+    node_builders: Vec<(u32, ErasedNodeBuilder<D>)>,
 }
 
 impl<D: UserData> Simulation<D> {
@@ -735,31 +751,64 @@ impl<D: UserData> Simulation<D> {
     ///
     /// Returns an error if any node fails to spawn or if any round fails to execute.
     pub async fn run(self) -> Result<()> {
-        // Spawn all nodes concurrently.
-        let mut nodes: Vec<_> = self
-            .spawners
-            .into_iter()
-            .map(async |(idx, spawner)| SimNode::spawn(spawner, idx, &self.data).await)
-            .try_join_all()
-            .await?;
+        let cancel_token = CancellationToken::new();
 
-        // Run all nodes concurrently.
-        nodes
-            .iter_mut()
-            .map(async |node| {
-                let idx = node.idx;
-                let scope = ScopeInfo::Isolated(node.info.clone());
-                let (client, data) = self.client.start_trace(self.name.clone(), scope).await?;
-                let data = data.context("expected user data to be set, but wasn't")?;
-                let data: D = postcard::from_bytes(&data).context("failed to decode user data")?;
-                node.run(&client, &data, self.max_rounds)
-                    .await
-                    .with_context(|| format!("node {idx} failed"))
+        // Spawn a task to submit logs.
+        let logs_task = {
+            let cancel_token = cancel_token.clone();
+            let client = self.client.clone();
+            let trace_id = self.trace_id;
+            let scope = match self.run_mode {
+                RunMode::Isolated(idx) => Scope::Isolated(idx),
+                _ => Scope::Integrated,
+            };
+            tokio::task::spawn(async move {
+                loop {
+                    let _ = cancel_token
+                        .run_until_cancelled(tokio::time::sleep(Duration::from_secs(1)))
+                        .await;
+                    let lines = self::trace::get_logs().await;
+                    if client.put_logs(trace_id, scope, lines).await.is_err() {
+                        break;
+                    }
+                    if cancel_token.is_cancelled() {
+                        break;
+                    }
+                }
+            })
+        };
+
+        // Spawn and run all nodes concurrently.
+        let result = self
+            .node_builders
+            .into_iter()
+            .map(async |(idx, builder)| {
+                let span = error_span!("sim-node", idx = idx);
+                SimNode::spawn_and_run(
+                    builder,
+                    self.client.clone(),
+                    self.trace_id,
+                    idx,
+                    &self.setup_data,
+                    self.max_rounds,
+                )
+                .instrument(span)
+                .await
             })
             .try_join_all()
-            .await?;
+            .await
+            .map(|_list| ());
 
-        Ok(())
+        cancel_token.cancel();
+        logs_task.await?;
+
+        if matches!(self.run_mode, RunMode::InitOnly | RunMode::Integrated) {
+            self.client
+                .close_trace(self.trace_id, to_str_err(&result))
+                .await?;
+        }
+
+        result
     }
 }
 

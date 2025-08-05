@@ -33,7 +33,7 @@ mod tests {
             let endpoint = context.bind_endpoint().await?;
             let router = Router::builder(endpoint).spawn();
             // We can access the shared data!
-            let _shared_secret = context.user_data().shared_secret;
+            let _shared_secret = context.setup_data().shared_secret;
             Ok(Self { router })
         }
     }
@@ -61,11 +61,11 @@ mod tests {
     }
 
     #[iroh_n0des::sim]
-    async fn test_simulation() -> Result<Builder<SetupData>> {
+    async fn test_simulation_setup_data() -> Result<Builder<SetupData>> {
         async fn round(_node: &mut MyNode, context: &RoundContext<'_, SetupData>) -> Result<bool> {
             // we can access the shared data!
-            let _shared_secret = context.user_data().shared_secret;
-            let _me = context.self_addr().node_id;
+            let _shared_secret = context.setup_data().shared_secret;
+            let _me = context.try_self_addr()?.node_id;
             // do whatever.
             Ok(true)
         }

@@ -34,6 +34,6 @@ pub use self::{
 mod tests {
     #[test]
     fn smoke() {
-        assert!(true, "it works")
+        assert_eq!(2 + 2, 4);
     }
 }
