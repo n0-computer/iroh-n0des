@@ -7,51 +7,58 @@ use tracing_subscriber::{
     EnvFilter, Layer,
     fmt::{MakeWriter, writer::MutexGuardWriter},
     layer::SubscriberExt,
-    util::SubscriberInitExt,
+    util::{SubscriberInitExt, TryInitError},
 };
+
+use crate::simulation::ENV_TRACE_SERVER;
 
 use super::proto::ActiveTrace;
 
-pub(crate) fn try_init_global_subscriber() {
+const ENV_RUST_LOG: &str = "RUST_LOG";
+const ENV_SIM_LOG: &str = "SIM_LOG";
+
+pub fn init() {
     static DID_INIT: OnceLock<bool> = OnceLock::new();
-    if DID_INIT.set(true).is_err() {
-        return;
+    if DID_INIT.set(true).is_ok() {
+        try_init().expect("unreachable: checked OnceLock before init");
     }
-    tracing::info!("setting up irpc tracing subscriber");
-    let print_layer = {
-        let directive = std::env::var("RUST_LOG").unwrap_or_else(|_| "".to_string());
-        let filter = EnvFilter::new(directive);
-        tracing_subscriber::fmt::layer()
+}
+
+pub fn try_init() -> Result<(), TryInitError> {
+    let print_layer = if let Ok(directive) = std::env::var(ENV_RUST_LOG) {
+        let layer = tracing_subscriber::fmt::layer()
             .with_writer(|| TestWriter)
             .event_format(tracing_subscriber::fmt::format().with_line_number(true))
             .with_level(true)
-            .with_filter(filter)
+            .with_filter(EnvFilter::new(directive));
+        Some(layer)
+    } else {
+        None
     };
 
-    let writer = global_writer();
-    let json_layer = {
-        let default_directive = "debug".to_string();
-        let directive = std::env::var("SIM_LOG").unwrap_or_else(|_| default_directive.to_string());
-        let filter = EnvFilter::new(directive);
-        tracing_subscriber::fmt::layer()
+    let json_layer = if std::env::var(ENV_TRACE_SERVER).is_ok() {
+        tracing::info!("setting up irpc tracing subscriber");
+        let directive = std::env::var(ENV_SIM_LOG).unwrap_or_else(|_| "debug".to_string());
+        let layer = tracing_subscriber::fmt::layer()
             .json()
-            .with_writer(writer)
-            .with_filter(filter)
+            .with_writer(global_writer())
+            .with_filter(EnvFilter::new(directive));
+        Some(layer)
+    } else {
+        None
     };
-
-    let registry = tracing_subscriber::registry()
+    tracing_subscriber::registry()
+        .with(print_layer)
         .with(json_layer)
-        .with(print_layer);
-
-    registry.try_init().ok();
+        .try_init()
 }
 
-pub(crate) fn global_writer() -> LineWriter {
+pub fn global_writer() -> LineWriter {
     static WRITER: OnceLock<LineWriter> = OnceLock::new();
     WRITER.get_or_init(Default::default).clone()
 }
 
-pub(crate) async fn submit_logs(client: &ActiveTrace) -> anyhow::Result<()> {
+pub async fn submit_logs(client: &ActiveTrace) -> anyhow::Result<()> {
     let writer = global_writer();
     writer.submit(client).await?;
     Ok(())

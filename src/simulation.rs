@@ -1,35 +1,660 @@
 use std::{
-    collections::BTreeMap,
-    future::Future,
+    any::Any,
     marker::PhantomData,
     pin::Pin,
-    sync::{Arc, OnceLock, RwLock},
-    time::Duration,
+    sync::{Arc, RwLock},
 };
 
-use anyhow::{Context as _, Result};
-#[cfg(all(feature = "iroh_main", not(feature = "iroh_v035")))]
+use anyhow::{Context, Result};
+use bytes::Bytes;
 use iroh::Watcher;
-use iroh_metrics::{Registry, encoding::Encoder};
-use n0_future::{FuturesUnordered, TryStreamExt};
-use proto::{ActiveTrace, NodeInfo, NodeInfoWithAddr, ScopeInfo, TraceClient, TraceInfo};
-use tokio::sync::Semaphore;
-use trace::submit_logs;
-use tracing::{Instrument, Span, error, error_span};
-
-use crate::{
-    iroh::{Endpoint, NodeAddr, NodeId},
-    n0des::N0de,
+use iroh_metrics::encoding::Encoder;
+use iroh_n0des::{
+    Registry,
+    iroh::{Endpoint, NodeAddr, NodeId, SecretKey},
+    simulation::proto::{ActiveTrace, NodeInfo, ScopeInfo, TraceClient, TraceInfo},
 };
+use n0_future::IterExt;
+use proto::NodeInfoWithAddr;
+use serde::{Serialize, de::DeserializeOwned};
+use tokio::sync::Semaphore;
+use tracing::info;
 
 pub mod events;
 pub mod proto;
-mod trace;
+pub mod trace;
 
 pub const ENV_TRACE_ISOLATED: &str = "N0DES_TRACE_ISOLATED";
 pub const ENV_TRACE_INIT_ONLY: &str = "N0DES_TRACE_INIT_ONLY";
 pub const ENV_TRACE_SERVER: &str = "N0DES_TRACE_SERVER";
 pub const ENV_TRACE_SESSION_ID: &str = "N0DES_SESSION_ID";
+
+type BoxedSetupFn<D> = Box<dyn 'static + Send + Sync + FnOnce() -> BoxFuture<'static, Result<D>>>;
+
+type BoxedSpawnFn<D> = Arc<
+    dyn 'static
+        + Send
+        + Sync
+        + for<'a> Fn(&'a mut SpawnContext<'a, D>) -> BoxFuture<'a, Result<BoxNode>>,
+>;
+type BoxedRoundFn<D> = Arc<
+    dyn 'static
+        + Send
+        + Sync
+        + for<'a> Fn(&'a mut BoxNode, &'a RoundContext<'a, D>) -> BoxFuture<'a, Result<bool>>,
+>;
+
+type BoxedCheckFn<D> = Arc<dyn Fn(&BoxNode, &RoundContext<'_, D>) -> Result<()>>;
+
+pub trait AsyncCallback<'a, A1: 'a, A2: 'a, T: 'a>:
+    'static + Send + Sync + Fn(&'a mut A1, &'a A2) -> Self::Fut
+{
+    type Fut: Future<Output = T> + Send;
+}
+
+impl<'a, A1: 'a, A2: 'a, T: 'a, Out, F> AsyncCallback<'a, A1, A2, T> for F
+where
+    Out: Send + Future<Output = T>,
+    F: 'static + Sync + Send + Fn(&'a mut A1, &'a A2) -> Out,
+{
+    type Fut = Out;
+}
+
+pub trait UserData:
+    Serialize + DeserializeOwned + Send + Sync + Clone + std::fmt::Debug + 'static
+{
+}
+impl<T> UserData for T where
+    T: Serialize + DeserializeOwned + Send + Sync + Clone + std::fmt::Debug + 'static
+{
+}
+
+pub struct SpawnContext<'a, D = ()> {
+    secret_key: SecretKey,
+    node_index: u32,
+    data: &'a D,
+    registry: &'a mut Registry,
+}
+
+impl<'a, D: UserData> SpawnContext<'a, D> {
+    pub fn node_index(&self) -> u32 {
+        self.node_index
+    }
+
+    pub fn user_data(&self) -> &D {
+        self.data
+    }
+
+    pub fn metrics_registry(&mut self) -> &mut Registry {
+        self.registry
+    }
+
+    pub fn secret_key(&self) -> SecretKey {
+        self.secret_key.clone()
+    }
+
+    pub fn node_id(&self) -> NodeId {
+        self.secret_key.public()
+    }
+
+    pub async fn bind_endpoint(&self) -> Result<Endpoint> {
+        let ep = Endpoint::builder()
+            .discovery_n0()
+            .secret_key(self.secret_key())
+            .bind()
+            .await?;
+        Ok(ep)
+    }
+}
+
+pub struct RoundContext<'a, D = ()> {
+    round: u32,
+    node_index: u32,
+    data: &'a D,
+    all_nodes: &'a Vec<NodeInfoWithAddr>,
+}
+
+impl<'a, D> RoundContext<'a, D> {
+    pub fn round(&self) -> u32 {
+        self.round
+    }
+
+    pub fn node_index(&self) -> u32 {
+        self.node_index
+    }
+
+    pub fn data(&self) -> &D {
+        self.data
+    }
+
+    pub fn all_other_nodes(&self, me: NodeId) -> impl Iterator<Item = &NodeAddr> + '_ {
+        self.all_nodes
+            .iter()
+            .filter(move |n| n.info.node_id != me)
+            .map(|n| &n.addr)
+    }
+
+    pub fn addr(&self, idx: u32) -> Result<NodeAddr> {
+        Ok(self
+            .all_nodes
+            .iter()
+            .find(|n| n.info.idx == idx)
+            .cloned()
+            .context("node not found")?
+            .addr)
+    }
+
+    pub fn self_addr(&self) -> &NodeAddr {
+        if let Some(ref addr) = self
+            .all_nodes
+            .iter()
+            .find(|n| n.info.idx == self.node_index)
+        {
+            &addr.addr
+        } else {
+            panic!("expected self address to be present")
+        }
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.all_nodes.len()
+    }
+}
+
+pub trait Spawn<D: UserData = ()>: Node + 'static {
+    fn spawn(context: &mut SpawnContext<'_, D>) -> impl Future<Output = Result<Self>> + Send
+    where
+        Self: Sized;
+
+    fn spawn_dyn<'a>(context: &'a mut SpawnContext<'a, D>) -> BoxFuture<'a, Result<BoxNode>>
+    where
+        Self: Sized,
+    {
+        Box::pin(async move {
+            let node = Self::spawn(context).await?;
+            let node: Box<dyn DynNode> = Box::new(node);
+            anyhow::Ok(node)
+        })
+    }
+
+    fn builder(
+        round_fn: impl for<'a> AsyncCallback<'a, Self, RoundContext<'a, D>, Result<bool>>,
+    ) -> NodeBuilder<Self, D>
+    where
+        Self: Sized,
+    {
+        NodeBuilder::new(round_fn)
+    }
+}
+
+// impl<F, N: Node, D> Spawn<D> for F
+// where
+//     F: Fn(Endpoint, SpawnContext<'_, D>) -> N,
+// {
+//     type Node = N;
+
+//     async fn spawn(endpoint: Endpoint, context: SpawnContext<'_, D>) -> Result<Self::Node>
+//     where
+//         Self: Sized,
+//     {
+//         F(endpoint, context).await
+//     }
+// }
+
+pub trait Node: Send + 'static {
+    fn endpoint(&self) -> Option<&Endpoint> {
+        None
+    }
+
+    fn shutdown(&mut self) -> impl Future<Output = Result<()>> + Send + '_ {
+        async { Ok(()) }
+    }
+}
+
+type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+pub type BoxNode = Box<dyn DynNode>;
+
+pub trait DynNode: Send + Any + 'static {
+    fn shutdown(&mut self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn endpoint(&self) -> Option<&Endpoint> {
+        None
+    }
+
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+impl<T: Node + Sized> DynNode for T {
+    fn shutdown(&mut self) -> BoxFuture<'_, Result<()>> {
+        Box::pin(<Self as Node>::shutdown(self))
+    }
+
+    fn endpoint(&self) -> Option<&Endpoint> {
+        <Self as Node>::endpoint(self)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+#[derive()]
+pub struct Builder<D = ()> {
+    setup_fn: BoxedSetupFn<D>,
+    spawners: Vec<(u32, ErasedNodeBuilder<D>)>,
+    rounds: u32,
+}
+
+#[derive(Clone)]
+pub struct NodeBuilder<N, D> {
+    phantom: PhantomData<N>,
+    spawn_fn: BoxedSpawnFn<D>,
+    round_fn: BoxedRoundFn<D>,
+    check_fn: Option<BoxedCheckFn<D>>,
+}
+
+#[derive(Clone)]
+struct ErasedNodeBuilder<D> {
+    spawn_fn: BoxedSpawnFn<D>,
+    round_fn: BoxedRoundFn<D>,
+    check_fn: Option<BoxedCheckFn<D>>,
+}
+
+impl<N: Spawn<D>, D: UserData> NodeBuilder<N, D> {
+    pub fn new(
+        round_fn: impl for<'a> AsyncCallback<'a, N, RoundContext<'a, D>, Result<bool>>,
+    ) -> Self {
+        let spawn_fn: BoxedSpawnFn<D> = Arc::new(N::spawn_dyn);
+        let round_fn: BoxedRoundFn<D> = Arc::new(move |node, context| {
+            let node = node
+                .as_any_mut()
+                .downcast_mut::<N>()
+                .expect("unreachable: type is statically guaranteed");
+            Box::pin(round_fn(node, context))
+        });
+        Self {
+            phantom: PhantomData,
+            spawn_fn,
+            round_fn,
+            check_fn: None,
+        }
+    }
+
+    pub fn check(
+        mut self,
+        check_fn: impl 'static + for<'a> Fn(&'a N, &RoundContext<'a, D>) -> Result<()>,
+    ) -> Self {
+        let check_fn: BoxedCheckFn<D> = Arc::new(move |node, context| {
+            let node = node
+                .as_any()
+                .downcast_ref::<N>()
+                .expect("unreachable: type is statically guaranteed");
+            check_fn(node, context)
+        });
+        self.check_fn = Some(check_fn);
+        self
+    }
+
+    fn erase(self) -> ErasedNodeBuilder<D> {
+        ErasedNodeBuilder {
+            spawn_fn: self.spawn_fn,
+            round_fn: self.round_fn,
+            check_fn: self.check_fn,
+        }
+    }
+}
+
+struct SimNode<D> {
+    node: BoxNode,
+    idx: u32,
+    round_fn: BoxedRoundFn<D>,
+    check_fn: Option<BoxedCheckFn<D>>,
+    round: u32,
+    info: NodeInfo,
+    metrics_encoder: Encoder,
+    all_nodes: Vec<NodeInfoWithAddr>,
+}
+
+impl<D: UserData> SimNode<D> {
+    // async fn spawn_and_run(
+    //     spawner: NodeBuilder<D>,
+    //     name: String,
+    //     node_index: u32,
+    //     data: &D,
+    //     client: Option<TraceClient>,
+    //     rounds: u32,
+    // ) -> Result<()> {
+    //     let mut node = Self::spawn(spawner, node_index, data).await?;
+    //     let scope = ScopeInfo::Isolated(node.info.clone());
+    //     let client = match client {
+    //         Some(client) => Some(client.start_trace(name, scope).await?),
+    //         None => None,
+    //     };
+    //     node.run(client.as_ref(), data, rounds).await?;
+    //     Ok(())
+    // }
+
+    async fn spawn(builder: ErasedNodeBuilder<D>, node_index: u32, data: &D) -> Result<Self> {
+        info!(idx = node_index, "run start");
+        let mut registry = Registry::default();
+        let mut context = SpawnContext {
+            data,
+            node_index,
+            secret_key: SecretKey::generate(&mut rand::rngs::OsRng),
+            registry: &mut registry,
+        };
+        let node_id = context.node_id();
+        let node = (builder.spawn_fn)(&mut context).await?;
+        if let Some(endpoint) = node.endpoint() {
+            registry.register_all(endpoint.metrics());
+        }
+
+        let info = NodeInfo {
+            node_id,
+            idx: node_index,
+            label: None,
+        };
+        Ok(Self {
+            node,
+            idx: node_index,
+            info,
+            round: 0,
+            round_fn: builder.round_fn,
+            check_fn: builder.check_fn,
+            metrics_encoder: Encoder::new(Arc::new(RwLock::new(registry))),
+            all_nodes: Default::default(),
+        })
+    }
+
+    async fn run(&mut self, client: &ActiveTrace, data: &D, rounds: u32) -> Result<()> {
+        info!(idx = self.idx, "run");
+
+        let info = NodeInfoWithAddr {
+            addr: self.my_addr().await,
+            info: self.info.clone(),
+        };
+        let all_nodes = client.wait_start(info).await?;
+        self.all_nodes = all_nodes;
+
+        let result = self.run_rounds(client, data, rounds).await;
+
+        client.end_trace(to_str_err(&result)).await.ok();
+
+        result
+    }
+
+    async fn run_rounds(&mut self, client: &ActiveTrace, data: &D, rounds: u32) -> Result<()> {
+        while self.round < rounds {
+            self.run_round(client, data)
+                .await
+                .with_context(|| format!("failed at round {}", self.round))?;
+            self.round += 1;
+        }
+        Ok(())
+    }
+
+    async fn run_round(&mut self, client: &ActiveTrace, data: &D) -> Result<()> {
+        info!(idx = self.idx, "run");
+        let context = RoundContext {
+            round: self.round,
+            node_index: self.idx,
+            data,
+            all_nodes: &self.all_nodes,
+        };
+
+        let result = (self.round_fn)(&mut self.node, &context).await;
+
+        let checkpoint = (context.round + 1) as u64;
+        let label = format!("Round {} end", context.round);
+        client
+            .put_checkpoint(checkpoint, self.idx, Some(label), to_str_err(&result))
+            .await?;
+        client
+            .put_metrics(
+                self.node_id(),
+                Some(checkpoint),
+                self.metrics_encoder.export(),
+            )
+            .await?;
+
+        client.wait_checkpoint(checkpoint).await?;
+
+        if let Some(check_fn) = self.check_fn.as_ref() {
+            (check_fn)(&self.node, &context).with_context(|| "check function failed")?;
+        }
+
+        result.map(|_| ())
+    }
+
+    fn node_id(&self) -> NodeId {
+        self.info.node_id
+    }
+
+    async fn my_addr(&self) -> NodeAddr {
+        let mut addr = NodeAddr::new(self.node_id());
+        if let Some(endpoint) = self.node.endpoint() {
+            endpoint.direct_addresses().initialized().await;
+            endpoint.home_relay().initialized().await;
+            addr = endpoint.node_addr().initialized().await;
+        }
+        addr
+    }
+}
+
+impl Builder<()> {
+    pub fn new() -> Builder<()> {
+        let setup_fn: BoxedSetupFn<()> = Box::new(move || Box::pin(async move { Ok(()) }));
+        Builder {
+            spawners: Vec::new(),
+            setup_fn,
+            rounds: 0,
+        }
+    }
+}
+impl<D: UserData> Builder<D> {
+    pub fn with_setup<F, Fut>(setup_fn: F) -> Builder<D>
+    where
+        F: 'static + Send + Sync + FnOnce() -> Fut,
+        Fut: 'static + Send + Future<Output = Result<D>>,
+    {
+        let setup_fn: BoxedSetupFn<D> = Box::new(move || Box::pin(setup_fn()));
+        Builder {
+            spawners: Vec::new(),
+            setup_fn,
+            rounds: 0,
+        }
+    }
+
+    pub fn rounds(mut self, rounds: u32) -> Self {
+        self.rounds = rounds;
+        self
+    }
+
+    pub fn spawn<N: Spawn<D>>(mut self, count: u32, node_builder: NodeBuilder<N, D>) -> Self {
+        self.spawners.push((count, node_builder.erase()));
+        self
+    }
+
+    // pub fn spawn<S: Spawn<D>>(
+    //     mut self,
+    //     count: u32,
+    //     round_fn: impl for<'a> AsyncCallback<'a, S::Node, RoundContext<'a, D>, Result<()>>,
+    //     check_fn: Option<
+    //         impl 'static + for<'a> Fn(&'a S::Node, &RoundContext<'a, D>) -> Result<()>,
+    //     >,
+    // ) -> Self {
+    //     let spawner = NodeBuilder::new::<S>(round_fn, check_fn);
+    //     self.spawners.push((count, spawner));
+    //     self
+    // }
+
+    pub async fn build(self, name: &str) -> Result<Simulation<D>> {
+        let client = TraceClient::from_env_or_local()?;
+        let run_mode = RunMode::from_env()?;
+        let name = name.to_string();
+
+        let node_count = self.spawners.iter().map(|(count, _spawner)| count).sum();
+
+        let data = (self.setup_fn)().await?;
+
+        if matches!(run_mode, RunMode::InitOnly | RunMode::Integrated) {
+            let user_data = Bytes::from(postcard::to_stdvec(&data)?);
+            client
+                .init_trace(
+                    TraceInfo {
+                        name: name.clone(),
+                        node_count,
+                        expected_checkpoints: Some(self.rounds as u64),
+                    },
+                    Some(user_data),
+                )
+                .await?;
+        }
+
+        let mut spawners = self
+            .spawners
+            .into_iter()
+            .flat_map(|(count, spawner)| (0..count).map(move |_| spawner.clone()))
+            .enumerate()
+            .map(|(idx, spawner)| (idx as u32, spawner));
+
+        let spawners: Vec<_> = match run_mode {
+            RunMode::InitOnly => vec![],
+            RunMode::Integrated => spawners.collect(),
+            RunMode::Isolated(idx) => vec![
+                spawners
+                    .nth(idx as usize)
+                    .context("invalid isolated index")?,
+            ],
+        };
+
+        Ok(Simulation {
+            name: name.to_string(),
+            data,
+            max_rounds: self.rounds,
+            spawners,
+            client,
+        })
+    }
+}
+
+pub struct Simulation<D> {
+    name: String,
+    data: D,
+    max_rounds: u32,
+    spawners: Vec<(u32, ErasedNodeBuilder<D>)>,
+    client: TraceClient,
+}
+
+impl<D: UserData> Simulation<D> {
+    pub async fn run(self) -> Result<()> {
+        // Spawn all nodes concurrently.
+        let mut nodes: Vec<_> = self
+            .spawners
+            .into_iter()
+            .map(async |(idx, spawner)| SimNode::spawn(spawner, idx, &self.data).await)
+            .try_join_all()
+            .await?;
+
+        // Run all nodes concurrently.
+        nodes
+            .iter_mut()
+            .map(async |node| {
+                let idx = node.idx;
+                let scope = ScopeInfo::Isolated(node.info.clone());
+                let (client, data) = self.client.start_trace(self.name.clone(), scope).await?;
+                let data = data.context("expected user data to be set, but wasn't")?;
+                let data: D = postcard::from_bytes(&data).context("failed to decode user data")?;
+                node.run(&client, &data, self.max_rounds)
+                    .await
+                    .with_context(|| format!("node {idx} failed"))
+            })
+            .try_join_all()
+            .await?;
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+enum RunMode {
+    InitOnly,
+    Integrated,
+    Isolated(u32),
+}
+
+impl RunMode {
+    fn from_env() -> Result<Self> {
+        if std::env::var(ENV_TRACE_INIT_ONLY).is_ok() {
+            Ok(Self::InitOnly)
+        } else {
+            match std::env::var(ENV_TRACE_ISOLATED) {
+                Err(_) => Ok(Self::Integrated),
+                Ok(s) => {
+                    let idx = s.parse().with_context(|| {
+                        format!("Failed to parse env var `{ENV_TRACE_ISOLATED}` as number")
+                    })?;
+                    Ok(Self::Isolated(idx))
+                }
+            }
+        }
+    }
+}
+
+static PERMIT: Semaphore = Semaphore::const_new(1);
+
+#[doc(hidden)]
+pub async fn run_sim_fn<F, Fut, D, E>(name: &str, sim_fn: F) -> anyhow::Result<()>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<Builder<D>, E>>,
+    D: UserData,
+    anyhow::Error: From<E>,
+{
+    // Ensure simulations run sequentially so that we can extract logs properly.
+    let permit = PERMIT.acquire().await.expect("semaphore closed");
+
+    // Init the global tracing subscriber.
+    self::trace::init();
+    // Clear remaining logs from previous runs.
+    self::trace::global_writer().clear();
+
+    eprintln!("running simulation: {name}");
+    let result = sim_fn()
+        .await
+        .map_err(anyhow::Error::from)
+        .with_context(|| format!("simulation builder function `{name}` failed"))?
+        .build(name)
+        .await
+        .with_context(|| format!("simulation `{name}` failed to build"))?
+        .run()
+        .await;
+
+    match &result {
+        Ok(()) => eprintln!("simulation `{name}` passed"),
+        Err(err) => eprintln!("simulation `{name}` failed: {err:#}"),
+    };
+    result.with_context(|| format!("simulation `{name}` failed to run"))?;
+
+    drop(permit);
+    Ok(())
+}
+
+fn to_str_err<T, E: std::fmt::Display>(res: &Result<T, E>) -> Result<(), String> {
+    if let Some(err) = res.as_ref().err() {
+        Err(err.to_string())
+    } else {
+        Ok(())
+    }
+}
 
 // /// Simulation context passed to each node
 // #[derive(Debug, Clone)]
