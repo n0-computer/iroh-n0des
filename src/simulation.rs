@@ -123,7 +123,7 @@ impl<'a, D> RoundContext<'a, D> {
         self.node_index
     }
 
-    pub fn data(&self) -> &D {
+    pub fn user_data(&self) -> &D {
         self.data
     }
 
@@ -478,8 +478,8 @@ impl<D: UserData> Builder<D> {
         self
     }
 
-    pub fn spawn<N: Spawn<D>>(mut self, count: u32, node_builder: NodeBuilder<N, D>) -> Self {
-        self.spawners.push((count, node_builder.erase()));
+    pub fn spawn<N: Spawn<D>>(mut self, node_count: u32, node_builder: NodeBuilder<N, D>) -> Self {
+        self.spawners.push((node_count, node_builder.erase()));
         self
     }
 

@@ -44,7 +44,7 @@ mod tests {
 
     async fn setup() -> anyhow::Result<Builder<Data>> {
         async fn round_bootstrap(
-            node: &mut BootstrapNode,
+            _node: &mut BootstrapNode,
             context: &RoundContext<'_, Data>,
         ) -> Result<bool> {
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -56,7 +56,7 @@ mod tests {
             Ok(true)
         }
         async fn round_client(
-            node: &mut ClientNode,
+            _node: &mut ClientNode,
             context: &RoundContext<'_, Data>,
         ) -> Result<bool> {
             tokio::time::sleep(Duration::from_millis(200)).await;

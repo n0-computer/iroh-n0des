@@ -12,7 +12,7 @@ use tokio::sync::Barrier;
 use tracing::debug;
 use uuid::Uuid;
 
-use super::{ENV_TRACE_SERVER, ENV_TRACE_SESSION_ID, UserData};
+use super::{ENV_TRACE_SERVER, ENV_TRACE_SESSION_ID};
 use crate::iroh::{NodeAddr, NodeId};
 
 pub const ALPN: &[u8] = b"/iroh/n0des-sim/1";

@@ -8,7 +8,7 @@ use tracing::{debug, instrument};
 use iroh_n0des::simulation::*;
 use iroh_n0des::{
     iroh::{
-        Endpoint, NodeAddr, NodeId,
+        Endpoint, NodeAddr,
         endpoint::Connection,
         protocol::{ProtocolHandler, Router},
     },
