@@ -25,9 +25,13 @@ pub mod events;
 pub mod proto;
 pub mod trace;
 
+/// Environment variable name for running a single isolated node by index.
 pub const ENV_TRACE_ISOLATED: &str = "N0DES_TRACE_ISOLATED";
+/// Environment variable name for initialization-only mode.
 pub const ENV_TRACE_INIT_ONLY: &str = "N0DES_TRACE_INIT_ONLY";
+/// Environment variable name for the trace server address.
 pub const ENV_TRACE_SERVER: &str = "N0DES_TRACE_SERVER";
+/// Environment variable name for the simulation session ID.
 pub const ENV_TRACE_SESSION_ID: &str = "N0DES_SESSION_ID";
 
 type BoxedSetupFn<D> = Box<dyn 'static + Send + Sync + FnOnce() -> BoxFuture<'static, Result<D>>>;
@@ -47,6 +51,12 @@ type BoxedRoundFn<D> = Arc<
 
 type BoxedCheckFn<D> = Arc<dyn Fn(&BoxNode, &RoundContext<'_, D>) -> Result<()>>;
 
+/// Helper trait for async functions.
+///
+/// This is needed because with a simple `impl Fn() -> Fut`, we can't
+/// express a variadic lifetime bound from the future to the function parameter.
+/// `impl AsyncFn` would allow this, but that doesn't allow to express a `Send`
+/// bound on the future.
 pub trait AsyncCallback<'a, A1: 'a, A2: 'a, T: 'a>:
     'static + Send + Sync + Fn(&'a mut A1, &'a A2) -> Self::Fut
 {
@@ -61,6 +71,10 @@ where
     type Fut = Out;
 }
 
+/// Trait for user-defined setup data that can be shared across simulation nodes.
+///
+/// User data must be serializable, deserializable, cloneable, and thread-safe
+/// to be distributed across simulation nodes.
 pub trait UserData:
     Serialize + DeserializeOwned + Send + Sync + Clone + std::fmt::Debug + 'static
 {
@@ -70,6 +84,10 @@ impl<T> UserData for T where
 {
 }
 
+/// Context provided when spawning a new simulation node.
+///
+/// Contains all the necessary information and resources for initializing
+/// a node, including its index, the shared setup data, and a metrics registry.
 pub struct SpawnContext<'a, D = ()> {
     secret_key: SecretKey,
     node_index: u32,
@@ -78,26 +96,38 @@ pub struct SpawnContext<'a, D = ()> {
 }
 
 impl<'a, D: UserData> SpawnContext<'a, D> {
+    /// Returns the index of this node in the simulation.
     pub fn node_index(&self) -> u32 {
         self.node_index
     }
 
+    /// Returns a reference to the setup data for this simulation.
     pub fn user_data(&self) -> &D {
         self.data
     }
 
+    /// Returns a mutable reference to a metrics registry.
+    ///
+    /// Use this to register custom metrics for the node being spawned.
     pub fn metrics_registry(&mut self) -> &mut Registry {
         self.registry
     }
 
+    /// Returns the secret key for this node.
     pub fn secret_key(&self) -> SecretKey {
         self.secret_key.clone()
     }
 
+    /// Returns the node id of this node.
     pub fn node_id(&self) -> NodeId {
         self.secret_key.public()
     }
 
+    /// Creates and binds a new endpoint with this node's secret key.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the endpoint fails to bind to a local address.
     pub async fn bind_endpoint(&self) -> Result<Endpoint> {
         let ep = Endpoint::builder()
             .discovery_n0()
@@ -108,6 +138,10 @@ impl<'a, D: UserData> SpawnContext<'a, D> {
     }
 }
 
+/// Context provided during each simulation round.
+///
+/// Contains information about the current round, this node's identity,
+/// the shared setup data, and the addresses of all participating nodes.
 pub struct RoundContext<'a, D = ()> {
     round: u32,
     node_index: u32,
@@ -116,18 +150,22 @@ pub struct RoundContext<'a, D = ()> {
 }
 
 impl<'a, D> RoundContext<'a, D> {
+    /// Returns the current round number.
     pub fn round(&self) -> u32 {
         self.round
     }
 
+    /// Returns the index of this node in the simulation.
     pub fn node_index(&self) -> u32 {
         self.node_index
     }
 
+    /// Returns a reference to the shared setup data for this simulation.
     pub fn user_data(&self) -> &D {
         self.data
     }
 
+    /// Returns an iterator over the addresses of all nodes except the specified one.
     pub fn all_other_nodes(&self, me: NodeId) -> impl Iterator<Item = &NodeAddr> + '_ {
         self.all_nodes
             .iter()
@@ -135,6 +173,11 @@ impl<'a, D> RoundContext<'a, D> {
             .map(|n| &n.addr)
     }
 
+    /// Returns the address of the node with the given index.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no node with the specified index exists.
     pub fn addr(&self, idx: u32) -> Result<NodeAddr> {
         Ok(self
             .all_nodes
@@ -145,6 +188,11 @@ impl<'a, D> RoundContext<'a, D> {
             .addr)
     }
 
+    /// Returns the address of this node.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this node's address is not found in the node list.
     pub fn self_addr(&self) -> &NodeAddr {
         if let Some(addr) = self
             .all_nodes
@@ -157,16 +205,30 @@ impl<'a, D> RoundContext<'a, D> {
         }
     }
 
+    /// Returns the total number of nodes participating in the simulation.
     pub fn node_count(&self) -> usize {
         self.all_nodes.len()
     }
 }
 
+/// Trait for types that can be spawned as simulation nodes.
 pub trait Spawn<D: UserData = ()>: Node + 'static {
+    /// Spawns a new instance of this node type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node fails to initialize properly.
     fn spawn(context: &mut SpawnContext<'_, D>) -> impl Future<Output = Result<Self>> + Send
     where
         Self: Sized;
 
+    /// Spawns a new instance as a dynamically-typed node.
+    ///
+    /// This calls `spawn` and boxes the result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node fails to initialize properly.
     fn spawn_dyn<'a>(context: &'a mut SpawnContext<'a, D>) -> BoxFuture<'a, Result<BoxNode>>
     where
         Self: Sized,
@@ -178,6 +240,10 @@ pub trait Spawn<D: UserData = ()>: Node + 'static {
         })
     }
 
+    /// Creates a new builder for this node type with the given round function.
+    ///
+    /// The round function will be called each simulation round and should return
+    /// `Ok(true)` to continue or `Ok(false)` to stop early.
     fn builder(
         round_fn: impl for<'a> AsyncCallback<'a, Self, RoundContext<'a, D>, Result<bool>>,
     ) -> NodeBuilder<Self, D>
@@ -202,11 +268,25 @@ pub trait Spawn<D: UserData = ()>: Node + 'static {
 //     }
 // }
 
+/// Trait for simulation node implementations.
+///
+/// Provides basic functionality for nodes including optional endpoint access
+/// and cleanup on shutdown.
 pub trait Node: Send + 'static {
+    /// Returns a reference to this node's endpoint, if any.
+    ///
+    /// The default implementation returns `None`.
     fn endpoint(&self) -> Option<&Endpoint> {
         None
     }
 
+    /// Shuts down this node, performing any necessary cleanup.
+    ///
+    /// The default implementation does nothing and returns success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if shutdown fails.
     fn shutdown(&mut self) -> impl Future<Output = Result<()>> + Send + '_ {
         async { Ok(()) }
     }
@@ -214,18 +294,36 @@ pub trait Node: Send + 'static {
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// A boxed dynamically-typed simulation node.
 pub type BoxNode = Box<dyn DynNode>;
 
+/// Trait for dynamically-typed simulation nodes.
+///
+/// This trait enables type erasure for nodes while preserving essential
+/// functionality like shutdown, endpoint access, and type casting.
 pub trait DynNode: Send + Any + 'static {
+    /// Shuts down this node, performing any necessary cleanup.
+    ///
+    /// The default implementation does nothing and returns success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if shutdown fails.
     fn shutdown(&mut self) -> BoxFuture<'_, Result<()>> {
         Box::pin(async { Ok(()) })
     }
 
+    /// Returns a reference to this node's endpoint, if any.
+    ///
+    /// The default implementation returns `None`.
     fn endpoint(&self) -> Option<&Endpoint> {
         None
     }
 
+    /// Returns a reference to this node as `Any` for downcasting.
     fn as_any(&self) -> &dyn Any;
+
+    /// Returns a mutable reference to this node as `Any` for downcasting.
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
@@ -248,6 +346,10 @@ impl<T: Node + Sized> DynNode for T {
 }
 
 #[derive()]
+/// Builder for constructing simulation configurations.
+///
+/// Allows configuring the setup function, node spawners, and number of rounds
+/// before building the final simulation.
 pub struct Builder<D = ()> {
     setup_fn: BoxedSetupFn<D>,
     spawners: Vec<(u32, ErasedNodeBuilder<D>)>,
@@ -255,6 +357,10 @@ pub struct Builder<D = ()> {
 }
 
 #[derive(Clone)]
+/// Builder for configuring individual nodes in a simulation.
+///
+/// Provides methods to set up spawn functions, round functions, and optional
+/// check functions for a specific node type.
 pub struct NodeBuilder<N, D> {
     phantom: PhantomData<N>,
     spawn_fn: BoxedSpawnFn<D>,
@@ -270,6 +376,10 @@ struct ErasedNodeBuilder<D> {
 }
 
 impl<N: Spawn<D>, D: UserData> NodeBuilder<N, D> {
+    /// Creates a new node builder with the given round function.
+    ///
+    /// The round function will be called each simulation round and should return
+    /// `Ok(true)` to continue or `Ok(false)` to stop early.
     pub fn new(
         round_fn: impl for<'a> AsyncCallback<'a, N, RoundContext<'a, D>, Result<bool>>,
     ) -> Self {
@@ -289,6 +399,14 @@ impl<N: Spawn<D>, D: UserData> NodeBuilder<N, D> {
         }
     }
 
+    /// Adds a check function that will be called after each round.
+    ///
+    /// The check function can verify node state and return an error to fail
+    /// the simulation if invariants are violated.
+    ///
+    /// # Errors
+    ///
+    /// The check function should return an error if validation fails.
     pub fn check(
         mut self,
         check_fn: impl 'static + for<'a> Fn(&'a N, &RoundContext<'a, D>) -> Result<()>,
@@ -476,6 +594,7 @@ impl Default for Builder<()> {
 }
 
 impl Builder<()> {
+    /// Creates a new simulation builder with empty setup data.
     pub fn new() -> Builder<()> {
         let setup_fn: BoxedSetupFn<()> = Box::new(move || Box::pin(async move { Ok(()) }));
         Builder {
@@ -486,6 +605,14 @@ impl Builder<()> {
     }
 }
 impl<D: UserData> Builder<D> {
+    /// Creates a new simulation builder with a setup function for user data.
+    ///
+    /// The setup function is called once before the simulation starts to
+    /// initialize the user data that will be shared across all nodes.
+    ///
+    /// # Errors
+    ///
+    /// The setup function should return an error if initialization fails.
     pub fn with_setup<F, Fut>(setup_fn: F) -> Builder<D>
     where
         F: 'static + Send + Sync + FnOnce() -> Fut,
@@ -499,11 +626,15 @@ impl<D: UserData> Builder<D> {
         }
     }
 
+    /// Sets the number of rounds this simulation will run.
     pub fn rounds(mut self, rounds: u32) -> Self {
         self.rounds = rounds;
         self
     }
 
+    /// Adds a group of nodes to spawn in this simulation.
+    ///
+    /// Each node will be created using the provided node builder configuration.
     pub fn spawn<N: Spawn<D>>(mut self, node_count: u32, node_builder: NodeBuilder<N, D>) -> Self {
         self.spawners.push((node_count, node_builder.erase()));
         self
@@ -522,6 +653,15 @@ impl<D: UserData> Builder<D> {
     //     self
     // }
 
+    /// Builds the final simulation from this configuration.
+    ///
+    /// This method initializes tracing, runs the setup function, and prepares
+    /// all nodes for execution based on the current run mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if setup fails, tracing initialization fails, or
+    /// the configuration is invalid for the current run mode.
     pub async fn build(self, name: &str) -> Result<Simulation<D>> {
         let client = TraceClient::from_env_or_local()?;
         let run_mode = RunMode::from_env()?;
@@ -572,6 +712,10 @@ impl<D: UserData> Builder<D> {
     }
 }
 
+/// A configured simulation ready to run.
+///
+/// Contains all the necessary components including user data, node spawners,
+/// and tracing client to execute a simulation run.
 pub struct Simulation<D> {
     name: String,
     data: D,
@@ -581,6 +725,14 @@ pub struct Simulation<D> {
 }
 
 impl<D: UserData> Simulation<D> {
+    /// Runs this simulation to completion.
+    ///
+    /// Spawns all configured nodes concurrently and executes the specified
+    /// number of simulation rounds.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any node fails to spawn or if any round fails to execute.
     pub async fn run(self) -> Result<()> {
         // Spawn all nodes concurrently.
         let mut nodes: Vec<_> = self
@@ -637,6 +789,15 @@ impl RunMode {
 
 static PERMIT: Semaphore = Semaphore::const_new(1);
 
+/// Runs a simulation function with proper setup and cleanup.
+///
+/// This function handles tracing initialization, sequential execution (via semaphore),
+/// log management, and error reporting for simulation functions.
+///
+/// # Errors
+///
+/// Returns an error if the simulation function fails, the builder fails,
+/// or the simulation execution fails.
 #[doc(hidden)]
 pub async fn run_sim_fn<F, Fut, D, E>(name: &str, sim_fn: F) -> anyhow::Result<()>
 where
