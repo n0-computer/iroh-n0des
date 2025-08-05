@@ -1,4 +1,4 @@
-#[cfg(test)]
+#[cfg(any(feature = "iroh_main", feature = "iroh_v035"))]
 mod tests {
     use std::time::Duration;
 

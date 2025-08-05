@@ -375,6 +375,15 @@ struct ErasedNodeBuilder<D> {
     check_fn: Option<BoxedCheckFn<D>>,
 }
 
+impl<T, N: Spawn<D>, D: UserData> From<T> for NodeBuilder<N, D>
+where
+    T: for<'a> AsyncCallback<'a, N, RoundContext<'a, D>, Result<bool>>,
+{
+    fn from(value: T) -> Self {
+        Self::new(value)
+    }
+}
+
 impl<N: Spawn<D>, D: UserData> NodeBuilder<N, D> {
     /// Creates a new node builder with the given round function.
     ///
@@ -635,23 +644,15 @@ impl<D: UserData> Builder<D> {
     /// Adds a group of nodes to spawn in this simulation.
     ///
     /// Each node will be created using the provided node builder configuration.
-    pub fn spawn<N: Spawn<D>>(mut self, node_count: u32, node_builder: NodeBuilder<N, D>) -> Self {
-        self.spawners.push((node_count, node_builder.erase()));
+    pub fn spawn<N: Spawn<D>>(
+        mut self,
+        node_count: u32,
+        node_builder: impl Into<NodeBuilder<N, D>>,
+    ) -> Self {
+        self.spawners
+            .push((node_count, node_builder.into().erase()));
         self
     }
-
-    // pub fn spawn<S: Spawn<D>>(
-    //     mut self,
-    //     count: u32,
-    //     round_fn: impl for<'a> AsyncCallback<'a, S::Node, RoundContext<'a, D>, Result<()>>,
-    //     check_fn: Option<
-    //         impl 'static + for<'a> Fn(&'a S::Node, &RoundContext<'a, D>) -> Result<()>,
-    //     >,
-    // ) -> Self {
-    //     let spawner = NodeBuilder::new::<S>(round_fn, check_fn);
-    //     self.spawners.push((count, spawner));
-    //     self
-    // }
 
     /// Builds the final simulation from this configuration.
     ///
