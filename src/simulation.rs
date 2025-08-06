@@ -76,13 +76,13 @@ where
 
 /// Trait for user-defined setup data that can be shared across simulation nodes.
 ///
-/// User data must be serializable, deserializable, cloneable, and thread-safe
+/// The setup data must be serializable, deserializable, cloneable, and thread-safe
 /// to be distributed across simulation nodes.
-pub trait UserData:
+pub trait SetupData:
     Serialize + DeserializeOwned + Send + Sync + Clone + std::fmt::Debug + 'static
 {
 }
-impl<T> UserData for T where
+impl<T> SetupData for T where
     T: Serialize + DeserializeOwned + Send + Sync + Clone + std::fmt::Debug + 'static
 {
 }
@@ -98,7 +98,7 @@ pub struct SpawnContext<'a, D = ()> {
     registry: &'a mut Registry,
 }
 
-impl<'a, D: UserData> SpawnContext<'a, D> {
+impl<'a, D: SetupData> SpawnContext<'a, D> {
     /// Returns the index of this node in the simulation.
     pub fn node_index(&self) -> u32 {
         self.node_index
@@ -210,7 +210,7 @@ impl<'a, D> RoundContext<'a, D> {
 }
 
 /// Trait for types that can be spawned as simulation nodes.
-pub trait Spawn<D: UserData = ()>: Node + 'static {
+pub trait Spawn<D: SetupData = ()>: Node + 'static {
     /// Spawns a new instance of this node type.
     ///
     /// # Errors
@@ -359,7 +359,7 @@ struct ErasedNodeBuilder<D> {
     check_fn: Option<BoxedCheckFn<D>>,
 }
 
-impl<T, N: Spawn<D>, D: UserData> From<T> for NodeBuilder<N, D>
+impl<T, N: Spawn<D>, D: SetupData> From<T> for NodeBuilder<N, D>
 where
     T: for<'a> AsyncCallback<'a, N, RoundContext<'a, D>, Result<bool>>,
 {
@@ -368,7 +368,7 @@ where
     }
 }
 
-impl<N: Spawn<D>, D: UserData> NodeBuilder<N, D> {
+impl<N: Spawn<D>, D: SetupData> NodeBuilder<N, D> {
     /// Creates a new node builder with the given round function.
     ///
     /// The round function will be called each simulation round and should return
@@ -436,7 +436,7 @@ struct SimNode<D> {
     all_nodes: Vec<NodeInfoWithAddr>,
 }
 
-impl<D: UserData> SimNode<D> {
+impl<D: SetupData> SimNode<D> {
     async fn spawn_and_run(
         builder: ErasedNodeBuilder<D>,
         client: TraceClient,
@@ -612,11 +612,11 @@ impl Builder<()> {
         }
     }
 }
-impl<D: UserData> Builder<D> {
-    /// Creates a new simulation builder with a setup function for user data.
+impl<D: SetupData> Builder<D> {
+    /// Creates a new simulation builder with a setup function for setup data.
     ///
     /// The setup function is called once before the simulation starts to
-    /// initialize the user data that will be shared across all nodes.
+    /// initialize the setup data that will be shared across all nodes.
     ///
     /// # Errors
     ///
@@ -696,7 +696,7 @@ impl<D: UserData> Builder<D> {
             info!(%name, node_count=info.node_count, %trace_id, "get simulation");
             let setup_data = setup_data.context("expected setup data to be set")?;
             let setup_data: D =
-                postcard::from_bytes(&setup_data).context("failed to decode user data")?;
+                postcard::from_bytes(&setup_data).context("failed to decode setup data")?;
             (trace_id, setup_data)
         };
 
@@ -730,7 +730,7 @@ impl<D: UserData> Builder<D> {
 
 /// A configured simulation ready to run.
 ///
-/// Contains all the necessary components including user data, node spawners,
+/// Contains all the necessary components including the setup data, node spawners,
 /// and tracing client to execute a simulation run.
 pub struct Simulation<D> {
     trace_id: Uuid,
@@ -741,7 +741,7 @@ pub struct Simulation<D> {
     node_builders: Vec<(u32, ErasedNodeBuilder<D>)>,
 }
 
-impl<D: UserData> Simulation<D> {
+impl<D: SetupData> Simulation<D> {
     /// Runs this simulation to completion.
     ///
     /// Spawns all configured nodes concurrently and executes the specified
@@ -853,7 +853,7 @@ pub async fn run_sim_fn<F, Fut, D, E>(name: &str, sim_fn: F) -> anyhow::Result<(
 where
     F: Fn() -> Fut,
     Fut: Future<Output = Result<Builder<D>, E>>,
-    D: UserData,
+    D: SetupData,
     anyhow::Error: From<E>,
 {
     // Ensure simulations run sequentially so that we can extract logs properly.

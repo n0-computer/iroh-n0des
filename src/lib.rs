@@ -32,8 +32,9 @@ pub use self::{
 
 #[cfg(test)]
 mod tests {
+    // keep to make sure that there is a test even with all features disabled.
     #[test]
-    fn smoke() {
+    fn dummy() {
         assert_eq!(2 + 2, 4);
     }
 }
