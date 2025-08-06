@@ -2,6 +2,10 @@
 
 An iroh protocol to interact with n0des, using iroh itself.
 
+## Feature flags
+
+By default, `iroh-n0des` depends on `iroh` v0.90. When the `iroh_v035` feature flag is enabled, the `simulation` module uses `iroh` v0.35 instead. When default features are disabled, all features that depend on `iroh` v0.90 are disabled.
+
 
 ## License
 

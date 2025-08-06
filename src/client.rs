@@ -129,7 +129,7 @@ impl From<irpc::Error> for BuildError {
     fn from(value: irpc::Error) -> Self {
         match value {
             irpc::Error::Request(irpc::RequestError::Connection(
-                iroh::endpoint::ConnectionError::ApplicationClosed(frame),
+                crate::iroh::endpoint::ConnectionError::ApplicationClosed(frame),
             )) if frame.error_code == 401u32.into() => Self::Unauthorized,
             value => Self::Rpc(value),
         }
