@@ -76,13 +76,13 @@
 <a href=#76 id=76 data-nosnippet>76</a>
 <a href=#77 id=77 data-nosnippet>77</a><span class="doccomment">/// Trait for user-defined setup data that can be shared across simulation nodes.
 <a href=#78 id=78 data-nosnippet>78</a>///
-<a href=#79 id=79 data-nosnippet>79</a>/// User data must be serializable, deserializable, cloneable, and thread-safe
+<a href=#79 id=79 data-nosnippet>79</a>/// The setup data must be serializable, deserializable, cloneable, and thread-safe
 <a href=#80 id=80 data-nosnippet>80</a>/// to be distributed across simulation nodes.
-<a href=#81 id=81 data-nosnippet>81</a></span><span class="kw">pub trait </span>UserData:
+<a href=#81 id=81 data-nosnippet>81</a></span><span class="kw">pub trait </span>SetupData:
 <a href=#82 id=82 data-nosnippet>82</a>    Serialize + DeserializeOwned + Send + Sync + Clone + std::fmt::Debug + <span class="lifetime">'static
 <a href=#83 id=83 data-nosnippet>83</a></span>{
 <a href=#84 id=84 data-nosnippet>84</a>}
-<a href=#85 id=85 data-nosnippet>85</a><span class="kw">impl</span>&lt;T&gt; UserData <span class="kw">for </span>T <span class="kw">where
+<a href=#85 id=85 data-nosnippet>85</a><span class="kw">impl</span>&lt;T&gt; SetupData <span class="kw">for </span>T <span class="kw">where
 <a href=#86 id=86 data-nosnippet>86</a>    </span>T: Serialize + DeserializeOwned + Send + Sync + Clone + std::fmt::Debug + <span class="lifetime">'static
 <a href=#87 id=87 data-nosnippet>87</a></span>{
 <a href=#88 id=88 data-nosnippet>88</a>}
@@ -98,7 +98,7 @@
 <a href=#98 id=98 data-nosnippet>98</a>    registry: <span class="kw-2">&amp;</span><span class="lifetime">'a </span><span class="kw-2">mut </span>Registry,
 <a href=#99 id=99 data-nosnippet>99</a>}
 <a href=#100 id=100 data-nosnippet>100</a>
-<a href=#101 id=101 data-nosnippet>101</a><span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, D: UserData&gt; SpawnContext&lt;<span class="lifetime">'a</span>, D&gt; {
+<a href=#101 id=101 data-nosnippet>101</a><span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, D: SetupData&gt; SpawnContext&lt;<span class="lifetime">'a</span>, D&gt; {
 <a href=#102 id=102 data-nosnippet>102</a>    <span class="doccomment">/// Returns the index of this node in the simulation.
 <a href=#103 id=103 data-nosnippet>103</a>    </span><span class="kw">pub fn </span>node_index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u32 {
 <a href=#104 id=104 data-nosnippet>104</a>        <span class="self">self</span>.node_index
@@ -210,7 +210,7 @@
 <a href=#210 id=210 data-nosnippet>210</a>}
 <a href=#211 id=211 data-nosnippet>211</a>
 <a href=#212 id=212 data-nosnippet>212</a><span class="doccomment">/// Trait for types that can be spawned as simulation nodes.
-<a href=#213 id=213 data-nosnippet>213</a></span><span class="kw">pub trait </span>Spawn&lt;D: UserData = ()&gt;: Node + <span class="lifetime">'static </span>{
+<a href=#213 id=213 data-nosnippet>213</a></span><span class="kw">pub trait </span>Spawn&lt;D: SetupData = ()&gt;: Node + <span class="lifetime">'static </span>{
 <a href=#214 id=214 data-nosnippet>214</a>    <span class="doccomment">/// Spawns a new instance of this node type.
 <a href=#215 id=215 data-nosnippet>215</a>    ///
 <a href=#216 id=216 data-nosnippet>216</a>    /// # Errors
@@ -359,7 +359,7 @@
 <a href=#359 id=359 data-nosnippet>359</a>    check_fn: <span class="prelude-ty">Option</span>&lt;BoxedCheckFn&lt;D&gt;&gt;,
 <a href=#360 id=360 data-nosnippet>360</a>}
 <a href=#361 id=361 data-nosnippet>361</a>
-<a href=#362 id=362 data-nosnippet>362</a><span class="kw">impl</span>&lt;T, N: Spawn&lt;D&gt;, D: UserData&gt; From&lt;T&gt; <span class="kw">for </span>NodeBuilder&lt;N, D&gt;
+<a href=#362 id=362 data-nosnippet>362</a><span class="kw">impl</span>&lt;T, N: Spawn&lt;D&gt;, D: SetupData&gt; From&lt;T&gt; <span class="kw">for </span>NodeBuilder&lt;N, D&gt;
 <a href=#363 id=363 data-nosnippet>363</a><span class="kw">where
 <a href=#364 id=364 data-nosnippet>364</a>    </span>T: <span class="kw">for</span>&lt;<span class="lifetime">'a</span>&gt; AsyncCallback&lt;<span class="lifetime">'a</span>, N, RoundContext&lt;<span class="lifetime">'a</span>, D&gt;, <span class="prelude-ty">Result</span>&lt;bool&gt;&gt;,
 <a href=#365 id=365 data-nosnippet>365</a>{
@@ -368,7 +368,7 @@
 <a href=#368 id=368 data-nosnippet>368</a>    }
 <a href=#369 id=369 data-nosnippet>369</a>}
 <a href=#370 id=370 data-nosnippet>370</a>
-<a href=#371 id=371 data-nosnippet>371</a><span class="kw">impl</span>&lt;N: Spawn&lt;D&gt;, D: UserData&gt; NodeBuilder&lt;N, D&gt; {
+<a href=#371 id=371 data-nosnippet>371</a><span class="kw">impl</span>&lt;N: Spawn&lt;D&gt;, D: SetupData&gt; NodeBuilder&lt;N, D&gt; {
 <a href=#372 id=372 data-nosnippet>372</a>    <span class="doccomment">/// Creates a new node builder with the given round function.
 <a href=#373 id=373 data-nosnippet>373</a>    ///
 <a href=#374 id=374 data-nosnippet>374</a>    /// The round function will be called each simulation round and should return
@@ -436,7 +436,7 @@
 <a href=#436 id=436 data-nosnippet>436</a>    all_nodes: Vec&lt;NodeInfoWithAddr&gt;,
 <a href=#437 id=437 data-nosnippet>437</a>}
 <a href=#438 id=438 data-nosnippet>438</a>
-<a href=#439 id=439 data-nosnippet>439</a><span class="kw">impl</span>&lt;D: UserData&gt; SimNode&lt;D&gt; {
+<a href=#439 id=439 data-nosnippet>439</a><span class="kw">impl</span>&lt;D: SetupData&gt; SimNode&lt;D&gt; {
 <a href=#440 id=440 data-nosnippet>440</a>    <span class="kw">async fn </span>spawn_and_run(
 <a href=#441 id=441 data-nosnippet>441</a>        builder: ErasedNodeBuilder&lt;D&gt;,
 <a href=#442 id=442 data-nosnippet>442</a>        client: TraceClient,
@@ -612,11 +612,11 @@
 <a href=#612 id=612 data-nosnippet>612</a>        }
 <a href=#613 id=613 data-nosnippet>613</a>    }
 <a href=#614 id=614 data-nosnippet>614</a>}
-<a href=#615 id=615 data-nosnippet>615</a><span class="kw">impl</span>&lt;D: UserData&gt; Builder&lt;D&gt; {
-<a href=#616 id=616 data-nosnippet>616</a>    <span class="doccomment">/// Creates a new simulation builder with a setup function for user data.
+<a href=#615 id=615 data-nosnippet>615</a><span class="kw">impl</span>&lt;D: SetupData&gt; Builder&lt;D&gt; {
+<a href=#616 id=616 data-nosnippet>616</a>    <span class="doccomment">/// Creates a new simulation builder with a setup function for setup data.
 <a href=#617 id=617 data-nosnippet>617</a>    ///
 <a href=#618 id=618 data-nosnippet>618</a>    /// The setup function is called once before the simulation starts to
-<a href=#619 id=619 data-nosnippet>619</a>    /// initialize the user data that will be shared across all nodes.
+<a href=#619 id=619 data-nosnippet>619</a>    /// initialize the setup data that will be shared across all nodes.
 <a href=#620 id=620 data-nosnippet>620</a>    ///
 <a href=#621 id=621 data-nosnippet>621</a>    /// # Errors
 <a href=#622 id=622 data-nosnippet>622</a>    ///
@@ -696,7 +696,7 @@
 <a href=#696 id=696 data-nosnippet>696</a>            <span class="macro">info!</span>(%name, node_count=info.node_count, %trace_id, <span class="string">"get simulation"</span>);
 <a href=#697 id=697 data-nosnippet>697</a>            <span class="kw">let </span>setup_data = setup_data.context(<span class="string">"expected setup data to be set"</span>)<span class="question-mark">?</span>;
 <a href=#698 id=698 data-nosnippet>698</a>            <span class="kw">let </span>setup_data: D =
-<a href=#699 id=699 data-nosnippet>699</a>                postcard::from_bytes(<span class="kw-2">&amp;</span>setup_data).context(<span class="string">"failed to decode user data"</span>)<span class="question-mark">?</span>;
+<a href=#699 id=699 data-nosnippet>699</a>                postcard::from_bytes(<span class="kw-2">&amp;</span>setup_data).context(<span class="string">"failed to decode setup data"</span>)<span class="question-mark">?</span>;
 <a href=#700 id=700 data-nosnippet>700</a>            (trace_id, setup_data)
 <a href=#701 id=701 data-nosnippet>701</a>        };
 <a href=#702 id=702 data-nosnippet>702</a>
@@ -730,7 +730,7 @@
 <a href=#730 id=730 data-nosnippet>730</a>
 <a href=#731 id=731 data-nosnippet>731</a><span class="doccomment">/// A configured simulation ready to run.
 <a href=#732 id=732 data-nosnippet>732</a>///
-<a href=#733 id=733 data-nosnippet>733</a>/// Contains all the necessary components including user data, node spawners,
+<a href=#733 id=733 data-nosnippet>733</a>/// Contains all the necessary components including the setup data, node spawners,
 <a href=#734 id=734 data-nosnippet>734</a>/// and tracing client to execute a simulation run.
 <a href=#735 id=735 data-nosnippet>735</a></span><span class="kw">pub struct </span>Simulation&lt;D&gt; {
 <a href=#736 id=736 data-nosnippet>736</a>    trace_id: Uuid,
@@ -741,7 +741,7 @@
 <a href=#741 id=741 data-nosnippet>741</a>    node_builders: Vec&lt;(u32, ErasedNodeBuilder&lt;D&gt;)&gt;,
 <a href=#742 id=742 data-nosnippet>742</a>}
 <a href=#743 id=743 data-nosnippet>743</a>
-<a href=#744 id=744 data-nosnippet>744</a><span class="kw">impl</span>&lt;D: UserData&gt; Simulation&lt;D&gt; {
+<a href=#744 id=744 data-nosnippet>744</a><span class="kw">impl</span>&lt;D: SetupData&gt; Simulation&lt;D&gt; {
 <a href=#745 id=745 data-nosnippet>745</a>    <span class="doccomment">/// Runs this simulation to completion.
 <a href=#746 id=746 data-nosnippet>746</a>    ///
 <a href=#747 id=747 data-nosnippet>747</a>    /// Spawns all configured nodes concurrently and executes the specified
@@ -853,7 +853,7 @@
 <a href=#853 id=853 data-nosnippet>853</a><span class="kw">where
 <a href=#854 id=854 data-nosnippet>854</a>    </span>F: Fn() -&gt; Fut,
 <a href=#855 id=855 data-nosnippet>855</a>    Fut: Future&lt;Output = <span class="prelude-ty">Result</span>&lt;Builder&lt;D&gt;, E&gt;&gt;,
-<a href=#856 id=856 data-nosnippet>856</a>    D: UserData,
+<a href=#856 id=856 data-nosnippet>856</a>    D: SetupData,
 <a href=#857 id=857 data-nosnippet>857</a>    anyhow::Error: From&lt;E&gt;,
 <a href=#858 id=858 data-nosnippet>858</a>{
 <a href=#859 id=859 data-nosnippet>859</a>    <span class="comment">// Ensure simulations run sequentially so that we can extract logs properly.
