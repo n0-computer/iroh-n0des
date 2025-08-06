@@ -772,30 +772,21 @@ impl<D: SetupData> Simulation<D> {
         let cancel_token = CancellationToken::new();
 
         // Spawn a task to submit logs.
-        let logs_task = {
-            let cancel_token = cancel_token.clone();
-            let client = self.client.clone();
-            let trace_id = self.trace_id;
-            tokio::task::spawn(async move {
-                let scope = match self.run_mode {
-                    RunMode::Isolated(idx) => Scope::Isolated(idx),
-                    RunMode::Integrated => Scope::Integrated,
-                    // Do not push logs for init-only runs.
-                    RunMode::InitOnly => return,
-                };
-                loop {
-                    let _ = cancel_token
-                        .run_until_cancelled(tokio::time::sleep(Duration::from_secs(1)))
-                        .await;
-                    let lines = self::trace::get_logs().await;
-                    if client.put_logs(trace_id, scope, lines).await.is_err() {
-                        break;
-                    }
-                    if cancel_token.is_cancelled() {
-                        break;
-                    }
-                }
-            })
+        let logs_scope = match self.run_mode {
+            RunMode::Isolated(idx) => Some(Scope::Isolated(idx)),
+            RunMode::Integrated => Some(Scope::Integrated),
+            // Do not push logs for init-only runs.
+            RunMode::InitOnly => None,
+        };
+        let logs_task = if let Some(scope) = logs_scope {
+            Some(spawn_logs_task(
+                self.client.clone(),
+                self.trace_id,
+                scope,
+                cancel_token.clone(),
+            ))
+        } else {
+            None
         };
 
         // Spawn and run all nodes concurrently.
@@ -820,7 +811,9 @@ impl<D: SetupData> Simulation<D> {
             .map(|_list| ());
 
         cancel_token.cancel();
-        logs_task.await?;
+        if let Some(join_handle) = logs_task {
+            join_handle.await?;
+        }
 
         if matches!(self.run_mode, RunMode::Integrated) {
             self.client
@@ -855,6 +848,30 @@ impl RunMode {
             }
         }
     }
+}
+
+/// Spawns a task that periodically submits the collected logs from our global
+/// tracing subscriber to a trace server.
+fn spawn_logs_task(
+    client: TraceClient,
+    trace_id: Uuid,
+    scope: Scope,
+    cancel_token: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    tokio::task::spawn(async move {
+        loop {
+            let _ = cancel_token
+                .run_until_cancelled(tokio::time::sleep(Duration::from_secs(1)))
+                .await;
+            let lines = self::trace::get_logs().await;
+            if client.put_logs(trace_id, scope, lines).await.is_err() {
+                break;
+            }
+            if cancel_token.is_cancelled() {
+                break;
+            }
+        }
+    })
 }
 
 static PERMIT: Semaphore = Semaphore::const_new(1);
