@@ -348,7 +348,7 @@ impl TraceClient {
         Ok(())
     }
 
-    pub async fn status(&self, session_id: Uuid) -> Result<Option<GetSessionResponse>> {
+    pub async fn get_session(&self, session_id: Uuid) -> Result<Option<GetSessionResponse>> {
         let res = self.client.rpc(GetSession { session_id }).await??;
         Ok(res)
     }

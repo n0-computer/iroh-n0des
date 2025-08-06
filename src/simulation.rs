@@ -342,7 +342,7 @@ impl<T: Node + Sized> DynNode for T {
 /// before building the final simulation.
 pub struct Builder<D = ()> {
     setup_fn: BoxedSetupFn<D>,
-    spawners: Vec<(u32, ErasedNodeBuilder<D>)>,
+    node_builders: Vec<(u32, ErasedNodeBuilder<D>)>,
     rounds: u32,
 }
 
@@ -612,7 +612,7 @@ impl Builder<()> {
     pub fn new() -> Builder<()> {
         let setup_fn: BoxedSetupFn<()> = Box::new(move || Box::pin(async move { Ok(()) }));
         Builder {
-            spawners: Vec::new(),
+            node_builders: Vec::new(),
             setup_fn,
             rounds: 0,
         }
@@ -638,7 +638,7 @@ impl<D: SetupData> Builder<D> {
     {
         let setup_fn: BoxedSetupFn<D> = Box::new(move || Box::pin(setup_fn()));
         Builder {
-            spawners: Vec::new(),
+            node_builders: Vec::new(),
             setup_fn,
             rounds: 0,
         }
@@ -663,7 +663,7 @@ impl<D: SetupData> Builder<D> {
         node_builder: impl Into<NodeBuilder<N, D>>,
     ) -> Self {
         let node_builder = node_builder.into();
-        self.spawners.push((node_count, node_builder.erase()));
+        self.node_builders.push((node_count, node_builder.erase()));
         self
     }
 
@@ -686,7 +686,11 @@ impl<D: SetupData> Builder<D> {
         {
             let setup_data = (self.setup_fn)().await?;
             let encoded_setup_data = Bytes::from(postcard::to_stdvec(&setup_data)?);
-            let node_count = self.spawners.iter().map(|(count, _spawner)| count).sum();
+            let node_count = self
+                .node_builders
+                .iter()
+                .map(|(count, _spawner)| count)
+                .sum();
             let trace_id = client
                 .init_trace(
                     TraceInfo {
@@ -714,18 +718,18 @@ impl<D: SetupData> Builder<D> {
             (trace_id, setup_data)
         };
 
-        let mut spawners = self
-            .spawners
+        let mut node_builders = self
+            .node_builders
             .into_iter()
             .flat_map(|(count, spawner)| (0..count).map(move |_| spawner.clone()))
             .enumerate()
             .map(|(idx, spawner)| (idx as u32, spawner));
 
-        let spawners: Vec<_> = match run_mode {
+        let node_builders: Vec<_> = match run_mode {
             RunMode::InitOnly => vec![],
-            RunMode::Integrated => spawners.collect(),
+            RunMode::Integrated => node_builders.collect(),
             RunMode::Isolated(idx) => vec![
-                spawners
+                node_builders
                     .nth(idx as usize)
                     .context("invalid isolated index")?,
             ],
@@ -734,7 +738,7 @@ impl<D: SetupData> Builder<D> {
         Ok(Simulation {
             run_mode,
             max_rounds: self.rounds,
-            node_builders: spawners,
+            node_builders,
             client,
             trace_id,
             setup_data,
@@ -768,28 +772,21 @@ impl<D: SetupData> Simulation<D> {
         let cancel_token = CancellationToken::new();
 
         // Spawn a task to submit logs.
-        let logs_task = {
-            let cancel_token = cancel_token.clone();
-            let client = self.client.clone();
-            let trace_id = self.trace_id;
-            let scope = match self.run_mode {
-                RunMode::Isolated(idx) => Scope::Isolated(idx),
-                _ => Scope::Integrated,
-            };
-            tokio::task::spawn(async move {
-                loop {
-                    let _ = cancel_token
-                        .run_until_cancelled(tokio::time::sleep(Duration::from_secs(1)))
-                        .await;
-                    let lines = self::trace::get_logs().await;
-                    if client.put_logs(trace_id, scope, lines).await.is_err() {
-                        break;
-                    }
-                    if cancel_token.is_cancelled() {
-                        break;
-                    }
-                }
-            })
+        let logs_scope = match self.run_mode {
+            RunMode::Isolated(idx) => Some(Scope::Isolated(idx)),
+            RunMode::Integrated => Some(Scope::Integrated),
+            // Do not push logs for init-only runs.
+            RunMode::InitOnly => None,
+        };
+        let logs_task = if let Some(scope) = logs_scope {
+            Some(spawn_logs_task(
+                self.client.clone(),
+                self.trace_id,
+                scope,
+                cancel_token.clone(),
+            ))
+        } else {
+            None
         };
 
         // Spawn and run all nodes concurrently.
@@ -814,9 +811,11 @@ impl<D: SetupData> Simulation<D> {
             .map(|_list| ());
 
         cancel_token.cancel();
-        logs_task.await?;
+        if let Some(join_handle) = logs_task {
+            join_handle.await?;
+        }
 
-        if matches!(self.run_mode, RunMode::InitOnly | RunMode::Integrated) {
+        if matches!(self.run_mode, RunMode::Integrated) {
             self.client
                 .close_trace(self.trace_id, to_str_err(&result))
                 .await?;
@@ -849,6 +848,30 @@ impl RunMode {
             }
         }
     }
+}
+
+/// Spawns a task that periodically submits the collected logs from our global
+/// tracing subscriber to a trace server.
+fn spawn_logs_task(
+    client: TraceClient,
+    trace_id: Uuid,
+    scope: Scope,
+    cancel_token: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    tokio::task::spawn(async move {
+        loop {
+            let _ = cancel_token
+                .run_until_cancelled(tokio::time::sleep(Duration::from_secs(1)))
+                .await;
+            let lines = self::trace::get_logs().await;
+            if client.put_logs(trace_id, scope, lines).await.is_err() {
+                break;
+            }
+            if cancel_token.is_cancelled() {
+                break;
+            }
+        }
+    })
 }
 
 static PERMIT: Semaphore = Semaphore::const_new(1);
