@@ -1,5 +1,6 @@
 use std::{
     any::Any,
+    fmt::Debug,
     marker::PhantomData,
     pin::Pin,
     sync::{Arc, RwLock},
@@ -78,14 +79,9 @@ where
 ///
 /// The setup data must be serializable, deserializable, cloneable, and thread-safe
 /// to be distributed across simulation nodes.
-pub trait SetupData:
-    Serialize + DeserializeOwned + Send + Sync + Clone + std::fmt::Debug + 'static
-{
-}
-impl<T> SetupData for T where
-    T: Serialize + DeserializeOwned + Send + Sync + Clone + std::fmt::Debug + 'static
-{
-}
+pub trait SetupData: Serialize + DeserializeOwned + Send + Sync + Clone + Debug + 'static {}
+impl<T> SetupData for T where T: Serialize + DeserializeOwned + Send + Sync + Clone + Debug + 'static
+{}
 
 /// Context provided when spawning a new simulation node.
 ///
@@ -210,6 +206,13 @@ impl<'a, D> RoundContext<'a, D> {
 }
 
 /// Trait for types that can be spawned as simulation nodes.
+///
+/// This trait is generic over `D: SetupData`, which is the type returned from the
+/// user-defined setup function (see [`Builder::with_setup`]). If not using the setup
+/// step, `D` defaults to the unit type `()`.
+///
+/// Implement this trait on your node type to be able to spawn the node in a simulation
+/// context. The only required method is [`Spawn::spawn`], which must return your spawned node.
 pub trait Spawn<D: SetupData = ()>: Node + 'static {
     /// Spawns a new instance of this node type.
     ///
@@ -256,6 +259,9 @@ pub trait Spawn<D: SetupData = ()>: Node + 'static {
 ///
 /// Provides basic functionality for nodes including optional endpoint access
 /// and cleanup on shutdown.
+///
+/// For a node to be usable in a simulation, you also need to implement [`Spawn`]
+/// for your node struct.
 pub trait Node: Send + 'static {
     /// Returns a reference to this node's endpoint, if any.
     ///
@@ -618,6 +624,10 @@ impl<D: SetupData> Builder<D> {
     /// The setup function is called once before the simulation starts to
     /// initialize the setup data that will be shared across all nodes.
     ///
+    /// The setup function can return any type that implements [`SetupData`],
+    /// which is an auto-implemented supertrait for all types that are
+    /// serializable, cloneable, and thread-safe. See [`SetupData`] for details.
+    ///
     /// # Errors
     ///
     /// The setup function should return an error if initialization fails.
@@ -643,6 +653,10 @@ impl<D: SetupData> Builder<D> {
     /// Adds a group of nodes to spawn in this simulation.
     ///
     /// Each node will be created using the provided node builder configuration.
+    ///
+    /// You can create a [`NodeBuilder`] from any type that implements [`Spawn<D>`] where
+    /// `D` is the type returned from [`Self::with_setup`]. If you are not using the setup
+    /// step, `D` defaults to the unit type `()`.
     pub fn spawn<N: Spawn<D>>(
         mut self,
         node_count: u32,
