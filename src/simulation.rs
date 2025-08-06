@@ -873,16 +873,17 @@ where
         .await
         .with_context(|| format!("simulation `{name}` failed to build"))?
         .run()
-        .await;
+        .await
+        .with_context(|| format!("simulation `{name}` failed to run"));
 
     match &result {
         Ok(()) => eprintln!("simulation `{name}` passed"),
         Err(err) => eprintln!("simulation `{name}` failed: {err:#}"),
     };
-    result.with_context(|| format!("simulation `{name}` failed to run"))?;
 
     drop(permit);
-    Ok(())
+
+    result
 }
 
 fn to_str_err<T, E: std::fmt::Display>(res: &Result<T, E>) -> Result<(), String> {

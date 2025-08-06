@@ -8,6 +8,7 @@ mod tests {
         simulation::{Builder, Node, RoundContext, Spawn, SpawnContext},
     };
     use serde::{Deserialize, Serialize};
+    use tracing::info;
 
     #[derive(Debug, Serialize, Deserialize, Clone)]
     struct Data {
@@ -78,12 +79,12 @@ mod tests {
 
     #[tokio::test]
     async fn smoke() -> anyhow::Result<()> {
-        tracing_subscriber::fmt::init();
-        tracing::warn!("start");
+        iroh_n0des::simulation::trace::init();
+        info!("start");
         let builder = setup().await?;
         let sim = builder.build("smoke").await?;
         sim.run().await?;
-        tracing::warn!("end");
+        info!("end");
         Ok(())
     }
 }

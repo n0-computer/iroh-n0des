@@ -2,7 +2,7 @@
 mod tests {
     use std::sync::Arc;
 
-    use anyhow::Result;
+    use anyhow::{Result, ensure};
     use iroh_metrics::Counter;
     use iroh_n0des::{
         iroh::{
@@ -144,7 +144,7 @@ mod tests {
 
         fn check(node: &PingNode, ctx: &RoundContext<'_>) -> Result<()> {
             let metrics = node.ping.metrics();
-            assert_eq!(metrics.pings_sent.get(), ctx.round() as u64 + 1);
+            ensure!(metrics.pings_sent.get() == ctx.round() as u64 + 1);
             Ok(())
         }
 
