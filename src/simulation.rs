@@ -488,7 +488,10 @@ impl<D: SetupData> SimNode<D> {
             all_nodes: Default::default(),
         };
 
-        let res = node.run(&client, setup_data, rounds).await;
+        let res = node
+            .run(&client, setup_data, rounds)
+            .await
+            .with_context(|| format!("node {} failed", node.idx));
         if let Err(err) = &res {
             warn!("node failed: {err:#}");
         }
@@ -547,7 +550,9 @@ impl<D: SetupData> SimNode<D> {
             all_nodes: &self.all_nodes,
         };
 
-        let result = (self.round_fn)(&mut self.node, &context).await;
+        let result = (self.round_fn)(&mut self.node, &context)
+            .await
+            .context("round function failed");
 
         let checkpoint = (context.round + 1) as u64;
         let label = format!("Round {} end", context.round);
@@ -564,13 +569,15 @@ impl<D: SetupData> SimNode<D> {
 
         client.wait_checkpoint(checkpoint).await?;
 
-        if let Some(check_fn) = self.check_fn.as_ref() {
-            (check_fn)(&self.node, &context).with_context(|| "check function failed")?;
+        match result {
+            Ok(out) => {
+                if let Some(check_fn) = self.check_fn.as_ref() {
+                    (check_fn)(&self.node, &context).context("check function failed")?;
+                }
+                Ok(out)
+            }
+            Err(err) => Err(err),
         }
-
-        info!("end round");
-
-        result
     }
 
     fn node_id(&self) -> Option<NodeId> {
@@ -923,9 +930,9 @@ where
     result
 }
 
-fn to_str_err<T, E: std::fmt::Display>(res: &Result<T, E>) -> Result<(), String> {
+fn to_str_err<T>(res: &Result<T, anyhow::Error>) -> Result<(), String> {
     if let Some(err) = res.as_ref().err() {
-        Err(err.to_string())
+        Err(format!("{err:?}"))
     } else {
         Ok(())
     }
