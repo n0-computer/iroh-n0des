@@ -572,7 +572,7 @@ impl<D: SetupData> SimNode<D> {
         match result {
             Ok(out) => {
                 if let Some(check_fn) = self.check_fn.as_ref() {
-                    (check_fn)(&self.node, &context).with_context(|| "check function failed")?;
+                    (check_fn)(&self.node, &context).context("check function failed")?;
                 }
                 Ok(out)
             }
