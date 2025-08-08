@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["get_logs","global_writer","init","submit_logs","try_init"],"struct":["LineWriter"]};
