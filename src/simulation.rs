@@ -89,7 +89,7 @@ impl<T> SetupData for T where T: Serialize + DeserializeOwned + Send + Sync + Cl
 /// a node, including its index, the shared setup data, and a metrics registry.
 pub struct SpawnContext<'a, D = ()> {
     secret_key: SecretKey,
-    node_index: u32,
+    node_idx: u32,
     setup_data: &'a D,
     registry: &'a mut Registry,
 }
@@ -97,7 +97,7 @@ pub struct SpawnContext<'a, D = ()> {
 impl<'a, D: SetupData> SpawnContext<'a, D> {
     /// Returns the index of this node in the simulation.
     pub fn node_index(&self) -> u32 {
-        self.node_index
+        self.node_idx
     }
 
     /// Returns a reference to the setup data for this simulation.
@@ -342,7 +342,7 @@ impl<T: Node + Sized> DynNode for T {
 /// before building the final simulation.
 pub struct Builder<D = ()> {
     setup_fn: BoxedSetupFn<D>,
-    node_builders: Vec<(u32, ErasedNodeBuilder<D>)>,
+    node_builders: Vec<NodeBuilderWithCount<D>>,
     rounds: u32,
 }
 
@@ -444,24 +444,24 @@ struct SimNode<D> {
 
 impl<D: SetupData> SimNode<D> {
     async fn spawn_and_run(
-        builder: ErasedNodeBuilder<D>,
+        builder: NodeBuilderWithIdx<D>,
         client: TraceClient,
         trace_id: Uuid,
-        node_index: u32,
         setup_data: &D,
         rounds: u32,
     ) -> Result<()> {
         let secret_key = SecretKey::generate(&mut rand::rngs::OsRng);
+        let NodeBuilderWithIdx { node_idx, builder } = builder;
         let info = NodeInfo {
             // TODO: Only assign node id if endpoint was created.
             node_id: Some(secret_key.public()),
-            idx: node_index,
+            idx: node_idx,
             label: None,
         };
         let mut registry = Registry::default();
         let mut context = SpawnContext {
             setup_data,
-            node_index,
+            node_idx,
             secret_key,
             registry: &mut registry,
         };
@@ -479,7 +479,7 @@ impl<D: SetupData> SimNode<D> {
         let mut node = Self {
             node,
             trace_id,
-            idx: node_index,
+            idx: node_idx,
             info,
             round: 0,
             round_fn: builder.round_fn,
@@ -670,7 +670,10 @@ impl<D: SetupData> Builder<D> {
         node_builder: impl Into<NodeBuilder<N, D>>,
     ) -> Self {
         let node_builder = node_builder.into();
-        self.node_builders.push((node_count, node_builder.erase()));
+        self.node_builders.push(NodeBuilderWithCount {
+            count: node_count,
+            builder: node_builder.erase(),
+        });
         self
     }
 
@@ -693,11 +696,7 @@ impl<D: SetupData> Builder<D> {
         {
             let setup_data = (self.setup_fn)().await?;
             let encoded_setup_data = Bytes::from(postcard::to_stdvec(&setup_data)?);
-            let node_count = self
-                .node_builders
-                .iter()
-                .map(|(count, _spawner)| count)
-                .sum();
+            let node_count = self.node_builders.iter().map(|builder| builder.count).sum();
             let trace_id = client
                 .init_trace(
                     TraceInfo {
@@ -728,9 +727,12 @@ impl<D: SetupData> Builder<D> {
         let mut node_builders = self
             .node_builders
             .into_iter()
-            .flat_map(|(count, spawner)| (0..count).map(move |_| spawner.clone()))
+            .flat_map(|builder| (0..builder.count).map(move |_| builder.builder.clone()))
             .enumerate()
-            .map(|(idx, spawner)| (idx as u32, spawner));
+            .map(|(node_idx, builder)| NodeBuilderWithIdx {
+                node_idx: node_idx as u32,
+                builder,
+            });
 
         let node_builders: Vec<_> = match run_mode {
             RunMode::InitOnly => vec![],
@@ -753,6 +755,16 @@ impl<D: SetupData> Builder<D> {
     }
 }
 
+struct NodeBuilderWithCount<D> {
+    count: u32,
+    builder: ErasedNodeBuilder<D>,
+}
+
+struct NodeBuilderWithIdx<D> {
+    node_idx: u32,
+    builder: ErasedNodeBuilder<D>,
+}
+
 /// A configured simulation ready to run.
 ///
 /// Contains all the necessary components including the setup data, node spawners,
@@ -763,7 +775,7 @@ pub struct Simulation<D> {
     client: TraceClient,
     setup_data: D,
     max_rounds: u32,
-    node_builders: Vec<(u32, ErasedNodeBuilder<D>)>,
+    node_builders: Vec<NodeBuilderWithIdx<D>>,
 }
 
 impl<D: SetupData> Simulation<D> {
@@ -800,13 +812,12 @@ impl<D: SetupData> Simulation<D> {
         let result = self
             .node_builders
             .into_iter()
-            .map(async |(idx, builder)| {
-                let span = error_span!("sim-node", idx = idx);
+            .map(async |builder| {
+                let span = error_span!("sim-node", idx = builder.node_idx);
                 SimNode::spawn_and_run(
                     builder,
                     self.client.clone(),
                     self.trace_id,
-                    idx,
                     &self.setup_data,
                     self.max_rounds,
                 )
