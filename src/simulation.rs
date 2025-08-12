@@ -467,11 +467,6 @@ impl<D: SetupData> SimNode<D> {
         };
         let node = (builder.spawn_fn)(&mut context).await?;
 
-        // TODO(Frando): enable metrics support for iroh 0.35
-        // iroh@0.35 uses iroh-metrics@0.34, which is a major version down from iroh-metrics@0.35
-        // which is used here, thus the traits are incompatible.
-        // Add shim to iroh-metrics@0.35 to support registering metrics from iroh-metrics@0.34
-        #[cfg(not(feature = "iroh_v035"))]
         if let Some(endpoint) = node.endpoint() {
             registry.register_all(endpoint.metrics());
         }
