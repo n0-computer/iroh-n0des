@@ -1577,7 +1577,7 @@ dependencies = [
  "iroh-quinn-proto",
  "iroh-quinn-udp",
  "iroh-relay 0.35.0",
- "n0-future",
+ "n0-future 0.1.3",
  "netdev 0.31.0",
  "netwatch 0.5.0",
  "pin-project",
@@ -1610,9 +1610,9 @@ dependencies = [
 
 [[package]]
 name = "iroh"
-version = "0.91.0"
+version = "0.91.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef05c956df0788a649d65c33fdbbb8fc4442d7716af3d67a1bd6d00a9ee56ead"
+checksum = "e52be9b8f33833ec080042f82035f87e90762c44be67b8c1aa0c593ff31a97d3"
 dependencies = [
  "aead",
  "backon",
@@ -1630,13 +1630,13 @@ dependencies = [
  "http",
  "igd-next",
  "instant",
- "iroh-base 0.91.0",
+ "iroh-base 0.91.2",
  "iroh-metrics 0.35.0",
  "iroh-quinn 0.14.0",
  "iroh-quinn-proto",
  "iroh-quinn-udp",
  "iroh-relay 0.91.0",
- "n0-future",
+ "n0-future 0.1.3",
  "n0-snafu",
  "n0-watcher",
  "nested_enum_utils",
@@ -1687,9 +1687,9 @@ dependencies = [
 
 [[package]]
 name = "iroh-base"
-version = "0.91.0"
+version = "0.91.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f68b5c5e190d8965699b2fd583f301a7e6094a0b89bb4d6c5baa94761fd1b7a3"
+checksum = "42393ff3628e5c765acdceb7da693d5f7869ec4c92599a83fa62368b15b0034e"
 dependencies = [
  "curve25519-dalek",
  "data-encoding",
@@ -1752,13 +1752,13 @@ dependencies = [
  "ed25519-dalek",
  "futures-buffered",
  "iroh 0.35.0",
- "iroh 0.91.0",
+ "iroh 0.91.2",
  "iroh-metrics 0.35.0",
  "iroh-n0des-macro",
  "iroh-quinn 0.14.0",
  "irpc",
  "irpc-iroh",
- "n0-future",
+ "n0-future 0.2.0",
  "postcard",
  "rand 0.8.5",
  "rcan",
@@ -1880,7 +1880,7 @@ dependencies = [
  "iroh-quinn 0.13.0",
  "iroh-quinn-proto",
  "lru 0.12.5",
- "n0-future",
+ "n0-future 0.1.3",
  "num_enum",
  "pin-project",
  "pkarr",
@@ -1922,12 +1922,12 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "iroh-base 0.91.0",
+ "iroh-base 0.91.2",
  "iroh-metrics 0.35.0",
  "iroh-quinn 0.14.0",
  "iroh-quinn-proto",
  "lru 0.13.0",
- "n0-future",
+ "n0-future 0.1.3",
  "n0-snafu",
  "nested_enum_utils",
  "num_enum",
@@ -1966,7 +1966,7 @@ dependencies = [
  "futures-util",
  "iroh-quinn 0.14.0",
  "irpc-derive",
- "n0-future",
+ "n0-future 0.1.3",
  "postcard",
  "rcgen",
  "rustls",
@@ -1997,9 +1997,9 @@ checksum = "f5926531af491c6962db4d79f43ea219404cb800889922a728b1d3b92f887eda"
 dependencies = [
  "anyhow",
  "getrandom 0.3.3",
- "iroh 0.91.0",
+ "iroh 0.91.2",
  "irpc",
- "n0-future",
+ "n0-future 0.1.3",
  "postcard",
  "serde",
  "tokio",
@@ -2196,6 +2196,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "n0-future"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89d7dd42bd0114c9daa9c4f2255d692a73bba45767ec32cf62892af6fe5d31f6"
+dependencies = [
+ "cfg_aliases",
+ "derive_more 1.0.0",
+ "futures-buffered",
+ "futures-lite",
+ "futures-util",
+ "js-sys",
+ "pin-project",
+ "send_wrapper",
+ "tokio",
+ "tokio-util",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-time",
+]
+
+[[package]]
 name = "n0-snafu"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2215,7 +2236,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c31462392a10d5ada4b945e840cbec2d5f3fee752b96c4b33eb41414d8f45c2a"
 dependencies = [
  "derive_more 1.0.0",
- "n0-future",
+ "n0-future 0.1.3",
  "snafu",
 ]
 
@@ -2387,7 +2408,7 @@ dependencies = [
  "iroh-quinn-udp",
  "js-sys",
  "libc",
- "n0-future",
+ "n0-future 0.1.3",
  "nested_enum_utils",
  "netdev 0.31.0",
  "netlink-packet-core",
@@ -2420,7 +2441,7 @@ dependencies = [
  "iroh-quinn-udp",
  "js-sys",
  "libc",
- "n0-future",
+ "n0-future 0.1.3",
  "n0-watcher",
  "nested_enum_utils",
  "netdev 0.36.0",
