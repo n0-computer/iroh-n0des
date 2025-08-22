@@ -63,9 +63,9 @@ pub async fn submit_logs(client: &ActiveTrace) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn get_logs() -> Vec<String> {
+pub fn get_logs() -> Vec<String> {
     let writer = global_writer();
-    writer.get().await
+    writer.get()
 }
 
 /// A tracing writer that interacts well with test output capture.
@@ -106,7 +106,7 @@ impl LineWriter {
         self.buf.lock().expect("lock poisoned").clear();
     }
 
-    pub async fn get(&self) -> Vec<String> {
+    pub fn get(&self) -> Vec<String> {
         let mut buf = self.buf.lock().expect("lock poisoned");
         let lines = buf
             .lines()
@@ -123,7 +123,7 @@ impl LineWriter {
     }
 
     pub async fn submit(&self, client: &ActiveTrace) -> anyhow::Result<()> {
-        let lines = self.get().await;
+        let lines = self.get();
         client.put_logs(lines).await?;
         Ok(())
     }
