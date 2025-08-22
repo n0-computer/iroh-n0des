@@ -878,12 +878,26 @@ fn spawn_logs_task(
 ) -> tokio::task::JoinHandle<()> {
     tokio::task::spawn(async move {
         loop {
-            let _ = cancel_token
+            if cancel_token
                 .run_until_cancelled(tokio::time::sleep(Duration::from_secs(1)))
-                .await;
-            let lines = self::trace::get_logs().await;
-            if client.put_logs(trace_id, scope, lines).await.is_err() {
+                .await
+                .is_none()
+            {
                 break;
+            }
+            let lines = self::trace::get_logs();
+            if lines.is_empty() {
+                continue;
+            }
+            // 500 chosen so that we stay below ~16MB of logs (irpc's MAX_MESSAGE_SIZE limit).
+            // This gives us ~32KB per log line on average.
+            for lines_chunk in lines.chunks(500) {
+                if let Err(e) = client.put_logs(trace_id, scope, lines_chunk.to_vec()).await {
+                    eprintln!(
+                        "warning: failed to submit logs due to error, stopping log submission now: {e:?}"
+                    );
+                    break;
+                }
             }
             if cancel_token.is_cancelled() {
                 break;
