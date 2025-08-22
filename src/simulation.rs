@@ -878,9 +878,13 @@ fn spawn_logs_task(
 ) -> tokio::task::JoinHandle<()> {
     tokio::task::spawn(async move {
         loop {
-            let _ = cancel_token
+            if cancel_token
                 .run_until_cancelled(tokio::time::sleep(Duration::from_secs(1)))
-                .await;
+                .await
+                .is_none()
+            {
+                break;
+            }
             let lines = self::trace::get_logs();
             if lines.is_empty() {
                 continue;
