@@ -244,9 +244,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.9.3"
+version = "2.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34efbcccd345379ca2868b2b2c9d3782e9cc58ba87bc7d79d5b53d9c9ae6f25d"
+checksum = "2261d10cca569e4643e526d8dc2e62e433cc8aba21ab764233731f8d369bf394"
 
 [[package]]
 name = "blake3"
@@ -1522,7 +1522,7 @@ version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "046fa2d4d00aea763528b4950358d0ead425372445dc8ff86312b3c69ff7727b"
 dependencies = [
- "bitflags 2.9.3",
+ "bitflags 2.9.4",
  "cfg-if",
  "libc",
 ]
@@ -1620,7 +1620,7 @@ dependencies = [
 [[package]]
 name = "iroh"
 version = "0.91.2"
-source = "git+https://github.com/n0-computer/iroh?branch=arqu%2Fnat_probes#2228d1e26d0b812193f7d0c2d940ec1ee7eaa725"
+source = "git+https://github.com/n0-computer/iroh?branch=arqu%2Fnat_probes#50582e49ba3ddb655a456494380021e0c5913b5d"
 dependencies = [
  "aead",
  "backon",
@@ -1696,7 +1696,7 @@ dependencies = [
 [[package]]
 name = "iroh-base"
 version = "0.91.2"
-source = "git+https://github.com/n0-computer/iroh?branch=arqu%2Fnat_probes#2228d1e26d0b812193f7d0c2d940ec1ee7eaa725"
+source = "git+https://github.com/n0-computer/iroh?branch=arqu%2Fnat_probes#50582e49ba3ddb655a456494380021e0c5913b5d"
 dependencies = [
  "curve25519-dalek",
  "data-encoding",
@@ -1916,7 +1916,7 @@ dependencies = [
 [[package]]
 name = "iroh-relay"
 version = "0.91.2"
-source = "git+https://github.com/n0-computer/iroh?branch=arqu%2Fnat_probes#2228d1e26d0b812193f7d0c2d940ec1ee7eaa725"
+source = "git+https://github.com/n0-computer/iroh?branch=arqu%2Fnat_probes#50582e49ba3ddb655a456494380021e0c5913b5d"
 dependencies = [
  "blake3",
  "bytes",
@@ -1965,7 +1965,7 @@ dependencies = [
 [[package]]
 name = "irpc"
 version = "0.7.0"
-source = "git+https://github.com/n0-computer/irpc?branch=arqu%2Fnat_probes#a98bc253be2952e025afcecac32070597fb0f744"
+source = "git+https://github.com/n0-computer/irpc?branch=arqu%2Fnat_probes#5af0a655b0709915036d055d09532904b7582625"
 dependencies = [
  "anyhow",
  "futures-buffered",
@@ -1987,7 +1987,7 @@ dependencies = [
 [[package]]
 name = "irpc-derive"
 version = "0.5.0"
-source = "git+https://github.com/n0-computer/irpc?branch=arqu%2Fnat_probes#a98bc253be2952e025afcecac32070597fb0f744"
+source = "git+https://github.com/n0-computer/irpc?branch=arqu%2Fnat_probes#5af0a655b0709915036d055d09532904b7582625"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1997,7 +1997,7 @@ dependencies = [
 [[package]]
 name = "irpc-iroh"
 version = "0.7.0"
-source = "git+https://github.com/n0-computer/irpc?branch=arqu%2Fnat_probes#a98bc253be2952e025afcecac32070597fb0f744"
+source = "git+https://github.com/n0-computer/irpc?branch=arqu%2Fnat_probes#5af0a655b0709915036d055d09532904b7582625"
 dependencies = [
  "anyhow",
  "getrandom 0.3.3",
@@ -2323,7 +2323,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0e7987b28514adf555dc1f9a5c30dfc3e50750bbaffb1aec41ca7b23dcd8e4"
 dependencies = [
  "anyhow",
- "bitflags 2.9.3",
+ "bitflags 2.9.4",
  "byteorder",
  "libc",
  "log",
@@ -2338,7 +2338,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0800eae8638a299eaa67476e1c6b6692922273e0f7939fd188fc861c837b9cd2"
 dependencies = [
  "anyhow",
- "bitflags 2.9.3",
+ "bitflags 2.9.4",
  "byteorder",
  "libc",
  "log",
@@ -2353,7 +2353,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56d83370a96813d7c977f8b63054f1162df6e5784f1c598d689236564fb5a6f2"
 dependencies = [
  "anyhow",
- "bitflags 2.9.3",
+ "bitflags 2.9.4",
  "byteorder",
  "libc",
  "log",
@@ -3268,7 +3268,7 @@ version = "0.5.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5407465600fb0548f1442edf71dd20683c6ed326200ace4b1ef0763521bb3b77"
 dependencies = [
- "bitflags 2.9.3",
+ "bitflags 2.9.4",
 ]
 
 [[package]]
@@ -3677,7 +3677,7 @@ version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dee851d0e5e7af3721faea1843e8015e820a234f81fda3dea9247e15bac9a86a"
 dependencies = [
- "bitflags 2.9.3",
+ "bitflags 2.9.4",
 ]
 
 [[package]]
@@ -3944,7 +3944,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c879d448e9d986b661742763247d3693ed13609438cf3d006f51f5368a5ba6b"
 dependencies = [
- "bitflags 2.9.3",
+ "bitflags 2.9.4",
  "core-foundation",
  "system-configuration-sys",
 ]
@@ -4227,7 +4227,7 @@ version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adc82fd73de2a9722ac5da747f12383d2bfdb93591ee6c58486e0097890f05f2"
 dependencies = [
- "bitflags 2.9.3",
+ "bitflags 2.9.4",
  "bytes",
  "futures-util",
  "http",
@@ -4420,9 +4420,9 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "uuid"
-version = "1.18.0"
+version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f33196643e165781c20a5ead5582283a7dacbb87855d867fbc2df3f81eddc1be"
+checksum = "2f87b8aa10b915a06587d0dec516c282ff295b475d94abf425d62b57710070a2"
 dependencies = [
  "getrandom 0.3.3",
  "js-sys",
