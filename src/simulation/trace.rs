@@ -4,7 +4,7 @@ use std::{
 };
 
 use tracing_subscriber::{
-    EnvFilter, Layer,
+    EnvFilter, Layer, Registry,
     fmt::{MakeWriter, writer::MutexGuardWriter},
     layer::SubscriberExt,
     util::{SubscriberInitExt, TryInitError},
@@ -21,6 +21,14 @@ pub fn init() {
     if DID_INIT.set(true).is_ok() {
         try_init().expect("unreachable: checked OnceLock before init");
     }
+}
+
+pub fn create_writer_and_layer() -> (impl Layer<Registry>, LineWriter) {
+    let writer = LineWriter::default();
+    let layer = tracing_subscriber::fmt::layer()
+        .json()
+        .with_writer(writer.clone());
+    (layer, writer)
 }
 
 pub fn try_init() -> Result<(), TryInitError> {
