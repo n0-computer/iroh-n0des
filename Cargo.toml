@@ -14,9 +14,9 @@ rust-version = "1.85"
 anyhow = "1.0.95"
 derive_more = { version = "2.0.1", features = ["display", "from"] }
 ed25519-dalek = "2.1.1"
-irpc = "0.7.0"
-irpc-iroh = { version = "0.7.0", optional = true }
-iroh = { version = "0.91.2", optional = true }
+irpc = "0.8.0"
+irpc-iroh = { version = "0.8.0", optional = true }
+iroh = { version = "0.92", optional = true }
 iroh_035 = { package = "iroh", version = "0.35", optional = true }
 iroh-n0des-macro = { version = "0.2.0", path = "iroh-n0des-macro" }
 iroh-metrics = "0.35.0"
@@ -58,7 +58,3 @@ iroh_v035 = ["dep:iroh_035"]
 name = "iroh-n0des"
 path = "src/main.rs"
 required-features = ["iroh_main"]
-
-[patch.crates-io]
-irpc = { git = "https://github.com/n0-computer/irpc", branch = "iroh-0-92" }
-iroh = { git = "https://github.com/n0-computer/iroh", branch = "main" }
