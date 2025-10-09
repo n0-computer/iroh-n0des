@@ -80,9 +80,6 @@ jobs:
             none)
                 echo "FEATURES=--no-default-features" >> "$GITHUB_ENV"
                 ;;
-            some)
-                echo "FEATURES=--features iroh_v035" >> "$GITHUB_ENV"
-                ;;
             default)
                 echo "FEATURES=" >> "$GITHUB_ENV"
                 ;;

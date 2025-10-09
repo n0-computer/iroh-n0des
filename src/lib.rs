@@ -13,9 +13,9 @@ extern crate self as iroh_n0des;
 pub use anyhow;
 pub use iroh_metrics::Registry;
 
-pub use self::n0des::N0de;
 pub use self::{
     client::{Client, ClientBuilder},
+    n0des::N0de,
     protocol::ALPN,
 };
 
