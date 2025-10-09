@@ -50,6 +50,7 @@ type BoxedRoundFn<D> = Arc<
         + Sync
         + for<'a> Fn(&'a mut BoxNode, &'a RoundContext<'a, D>) -> BoxFuture<'a, Result<bool>>,
 >;
+type RoundLabelFn<D> = Arc<dyn 'static + Send + Sync + for<'a> Fn(&'a D, u32) -> Option<String>>;
 
 type BoxedCheckFn<D> = Arc<dyn Fn(&BoxNode, &RoundContext<'_, D>) -> Result<()>>;
 
@@ -221,6 +222,10 @@ pub trait Spawn<D: SetupData = ()>: Node + 'static {
     where
         Self: Sized;
 
+    fn round_label(_setup_data: &D, _round: u32) -> Option<String> {
+        None
+    }
+
     /// Spawns a new instance as a dynamically-typed node.
     ///
     /// This calls `spawn` and boxes the result.
@@ -308,6 +313,10 @@ pub trait DynNode: Send + Any + 'static {
         None
     }
 
+    fn round_label(&self, _round: u32) -> Option<String> {
+        None
+    }
+
     /// Returns a reference to this node as `Any` for downcasting.
     fn as_any(&self) -> &dyn Any;
 
@@ -353,6 +362,7 @@ pub struct NodeBuilder<N, D> {
     phantom: PhantomData<N>,
     spawn_fn: BoxedSpawnFn<D>,
     round_fn: BoxedRoundFn<D>,
+    round_label_fn: RoundLabelFn<D>,
     check_fn: Option<BoxedCheckFn<D>>,
 }
 
@@ -360,6 +370,7 @@ pub struct NodeBuilder<N, D> {
 struct ErasedNodeBuilder<D> {
     spawn_fn: BoxedSpawnFn<D>,
     round_fn: BoxedRoundFn<D>,
+    round_label_fn: RoundLabelFn<D>,
     check_fn: Option<BoxedCheckFn<D>>,
 }
 
@@ -381,6 +392,7 @@ impl<N: Spawn<D>, D: SetupData> NodeBuilder<N, D> {
         round_fn: impl for<'a> AsyncCallback<'a, N, RoundContext<'a, D>, Result<bool>>,
     ) -> Self {
         let spawn_fn: BoxedSpawnFn<D> = Arc::new(N::spawn_dyn);
+        let round_label_fn: RoundLabelFn<D> = Arc::new(N::round_label);
         let round_fn: BoxedRoundFn<D> = Arc::new(move |node, context| {
             let node = node
                 .as_any_mut()
@@ -393,6 +405,7 @@ impl<N: Spawn<D>, D: SetupData> NodeBuilder<N, D> {
             spawn_fn,
             round_fn,
             check_fn: None,
+            round_label_fn,
         }
     }
 
@@ -424,6 +437,7 @@ impl<N: Spawn<D>, D: SetupData> NodeBuilder<N, D> {
             spawn_fn: self.spawn_fn,
             round_fn: self.round_fn,
             check_fn: self.check_fn,
+            round_label_fn: self.round_label_fn,
         }
     }
 }
@@ -434,6 +448,7 @@ struct SimNode<D> {
     idx: u32,
     round_fn: BoxedRoundFn<D>,
     check_fn: Option<BoxedCheckFn<D>>,
+    round_label_fn: RoundLabelFn<D>,
     round: u32,
     info: NodeInfo,
     metrics_encoder: Encoder,
@@ -478,6 +493,7 @@ impl<D: SetupData> SimNode<D> {
             round_fn: builder.round_fn,
             check_fn: builder.check_fn,
             metrics_encoder: Encoder::new(Arc::new(RwLock::new(registry))),
+            round_label_fn: builder.round_label_fn,
             all_nodes: Default::default(),
         };
 
@@ -543,15 +559,22 @@ impl<D: SetupData> SimNode<D> {
             all_nodes: &self.all_nodes,
         };
 
+        let label = (self.round_label_fn)(setup_data, self.round)
+            .unwrap_or_else(|| format!("Round {}", self.round));
+
+        info!(%label, "start round");
+
         let result = (self.round_fn)(&mut self.node, &context)
             .await
             .context("round function failed");
 
+        info!(%label, "end round");
+
         let checkpoint = (context.round + 1) as u64;
-        let label = format!("Round {} end", context.round);
         client
             .put_checkpoint(checkpoint, Some(label), to_str_err(&result))
-            .await?;
+            .await
+            .context("put checkpoint")?;
 
         // TODO(Frando): Couple metrics to node idx, not node id.
         if let Some(node_id) = self.node_id() {
@@ -560,7 +583,10 @@ impl<D: SetupData> SimNode<D> {
                 .await?;
         }
 
-        client.wait_checkpoint(checkpoint).await?;
+        client
+            .wait_checkpoint(checkpoint)
+            .await
+            .context("wait checkpoint")?;
 
         match result {
             Ok(out) => {
