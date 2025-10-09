@@ -2,9 +2,9 @@ use std::{collections::BTreeMap, net::SocketAddr};
 
 use anyhow::Result;
 use bytes::Bytes;
+use iroh::{NodeAddr, NodeId};
 use iroh_metrics::encoding::Update;
 use irpc::{WithChannels, channel::oneshot, rpc_requests, util::make_insecure_client_endpoint};
-#[cfg(feature = "iroh_main")]
 use irpc_iroh::IrohRemoteConnection;
 use n0_future::{IterExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,6 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::{ENV_TRACE_SERVER, ENV_TRACE_SESSION_ID};
-use crate::iroh::{NodeAddr, NodeId};
 
 pub const ALPN: &[u8] = b"/iroh/n0des-sim/1";
 
@@ -281,13 +280,11 @@ impl TraceClient {
         Self { client, session_id }
     }
 
-    #[cfg(feature = "iroh_main")]
     pub async fn connect_iroh(remote: iroh::NodeId, session_id: Uuid) -> Result<Self> {
         let endpoint = iroh::Endpoint::builder().bind().await?;
         Ok(Self::connect_iroh_endpoint(endpoint, remote, session_id))
     }
 
-    #[cfg(feature = "iroh_main")]
     pub fn connect_iroh_endpoint(
         endpoint: iroh::Endpoint,
         remote: impl Into<iroh::NodeAddr>,

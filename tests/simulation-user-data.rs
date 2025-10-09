@@ -1,10 +1,7 @@
-#[cfg(any(feature = "iroh_main", feature = "iroh_v035"))]
 mod tests {
     use anyhow::Result;
-    use iroh_n0des::{
-        iroh::{Endpoint, protocol::Router},
-        simulation::*,
-    };
+    use iroh::{Endpoint, protocol::Router};
+    use iroh_n0des::simulation::*;
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize, Clone)]
