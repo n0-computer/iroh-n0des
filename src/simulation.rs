@@ -16,12 +16,15 @@ use iroh_n0des::{
     simulation::proto::{ActiveTrace, NodeInfo, TraceClient, TraceInfo},
 };
 use n0_future::IterExt;
+use n0_watcher::Watchable;
 use proto::{GetTraceResponse, NodeInfoWithAddr, Scope};
 use serde::{Serialize, de::DeserializeOwned};
-use tokio::sync::Semaphore;
+use tokio::{sync::Semaphore, time::MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error_span, info, warn};
 use uuid::Uuid;
+
+use crate::simulation::proto::CheckpointId;
 
 pub mod events;
 pub mod proto;
@@ -35,6 +38,8 @@ pub const ENV_TRACE_INIT_ONLY: &str = "N0DES_TRACE_INIT_ONLY";
 pub const ENV_TRACE_SERVER: &str = "N0DES_TRACE_SERVER";
 /// Environment variable name for the simulation session ID.
 pub const ENV_TRACE_SESSION_ID: &str = "N0DES_SESSION_ID";
+
+const METRICS_INTERVAL: Duration = Duration::from_secs(1);
 
 type BoxedSetupFn<D> = Box<dyn 'static + Send + Sync + FnOnce() -> BoxFuture<'static, Result<D>>>;
 
@@ -451,7 +456,8 @@ struct SimNode<D> {
     round_label_fn: RoundLabelFn<D>,
     round: u32,
     info: NodeInfo,
-    metrics_encoder: Encoder,
+    metrics: Arc<RwLock<Registry>>,
+    checkpoint_watcher: n0_watcher::Watchable<CheckpointId>,
     all_nodes: Vec<NodeInfoWithAddr>,
 }
 
@@ -492,8 +498,9 @@ impl<D: SetupData> SimNode<D> {
             round: 0,
             round_fn: builder.round_fn,
             check_fn: builder.check_fn,
-            metrics_encoder: Encoder::new(Arc::new(RwLock::new(registry))),
             round_label_fn: builder.round_label_fn,
+            checkpoint_watcher: Watchable::new(0),
+            metrics: Arc::new(RwLock::new(registry)),
             all_nodes: Default::default(),
         };
 
@@ -511,6 +518,38 @@ impl<D: SetupData> SimNode<D> {
         let client = client.start_node(self.trace_id, self.info.clone()).await?;
 
         info!(idx = self.idx, "start");
+
+        // Spawn a task to periodically put metrics.
+        if let Some(node_id) = self.node_id() {
+            let client = client.clone();
+            let mut watcher = self.checkpoint_watcher.watch();
+            let mut metrics_encoder = Encoder::new(self.metrics.clone());
+            tokio::task::spawn(
+                async move {
+                    let mut interval = tokio::time::interval(METRICS_INTERVAL);
+                    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+                    loop {
+                        let checkpoint = tokio::select! {
+                            _ = interval.tick() => None,
+                            checkpoint = watcher.updated() => {
+                                match checkpoint {
+                                    Err(_) => break,
+                                    Ok(checkpoint) => Some(checkpoint)
+                                }
+                            }
+                        };
+                        if let Err(err) = client
+                            .put_metrics(node_id, checkpoint, metrics_encoder.export())
+                            .await
+                        {
+                            warn!(?err, "failed to put metrics, stop metrics task");
+                            break;
+                        }
+                    }
+                }
+                .instrument(error_span!("metrics")),
+            );
+        }
 
         let info = NodeInfoWithAddr {
             addr: self.my_addr().await,
@@ -551,7 +590,6 @@ impl<D: SetupData> SimNode<D> {
 
     #[tracing::instrument(name="round", skip_all, fields(round=self.round))]
     async fn run_round(&mut self, client: &ActiveTrace, setup_data: &D) -> Result<bool> {
-        info!("start round");
         let context = RoundContext {
             round: self.round,
             node_index: self.idx,
@@ -571,17 +609,11 @@ impl<D: SetupData> SimNode<D> {
         info!(%label, "end round");
 
         let checkpoint = (context.round + 1) as u64;
+        self.checkpoint_watcher.set(checkpoint).ok();
         client
             .put_checkpoint(checkpoint, Some(label), to_str_err(&result))
             .await
             .context("put checkpoint")?;
-
-        // TODO(Frando): Couple metrics to node idx, not node id.
-        if let Some(node_id) = self.node_id() {
-            client
-                .put_metrics(node_id, Some(checkpoint), self.metrics_encoder.export())
-                .await?;
-        }
 
         client
             .wait_checkpoint(checkpoint)
