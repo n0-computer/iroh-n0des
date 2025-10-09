@@ -9,12 +9,10 @@ use std::{
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-#[cfg(not(feature = "iroh_v035"))]
-use iroh::Watcher;
+use iroh::{Endpoint, NodeAddr, NodeId, SecretKey};
 use iroh_metrics::encoding::Encoder;
 use iroh_n0des::{
     Registry,
-    iroh::{Endpoint, NodeAddr, NodeId, SecretKey},
     simulation::proto::{ActiveTrace, NodeInfo, TraceClient, TraceInfo},
 };
 use n0_future::IterExt;
@@ -450,7 +448,7 @@ impl<D: SetupData> SimNode<D> {
         setup_data: &D,
         rounds: u32,
     ) -> Result<()> {
-        let secret_key = SecretKey::generate(&mut rand::rngs::OsRng);
+        let secret_key = SecretKey::generate(&mut rand::rng());
         let NodeBuilderWithIdx { node_idx, builder } = builder;
         let info = NodeInfo {
             // TODO: Only assign node id if endpoint was created.
@@ -467,11 +465,6 @@ impl<D: SetupData> SimNode<D> {
         };
         let node = (builder.spawn_fn)(&mut context).await?;
 
-        // TODO(Frando): enable metrics support for iroh 0.35
-        // iroh@0.35 uses iroh-metrics@0.34, which is a major version down from iroh-metrics@0.35
-        // which is used here, thus the traits are incompatible.
-        // Add shim to iroh-metrics@0.35 to support registering metrics from iroh-metrics@0.34
-        #[cfg(not(feature = "iroh_v035"))]
         if let Some(endpoint) = node.endpoint() {
             registry.register_all(endpoint.metrics());
         }
@@ -594,18 +587,8 @@ impl<D: SetupData> SimNode<D> {
 }
 
 async fn node_addr(endpoint: &Endpoint) -> NodeAddr {
-    #[cfg(feature = "iroh_v035")]
-    let addr = endpoint
-        .node_addr()
-        .await
-        .expect("node_addr mustn't fail unless endpoint has shut down");
-    #[cfg(not(feature = "iroh_v035"))]
-    let addr = {
-        endpoint.direct_addresses().initialized().await;
-        endpoint.home_relay().initialized().await;
-        endpoint.node_addr().initialized().await
-    };
-    addr
+    endpoint.online().await;
+    endpoint.node_addr()
 }
 
 impl Default for Builder<()> {

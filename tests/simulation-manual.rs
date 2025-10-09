@@ -1,12 +1,9 @@
-#[cfg(any(feature = "iroh_main", feature = "iroh_v035"))]
 mod tests {
     use std::time::Duration;
 
     use anyhow::Result;
-    use iroh_n0des::{
-        iroh::Endpoint,
-        simulation::{Builder, Node, RoundContext, Spawn, SpawnContext},
-    };
+    use iroh::Endpoint;
+    use iroh_n0des::simulation::{Builder, Node, RoundContext, Spawn, SpawnContext};
     use serde::{Deserialize, Serialize};
     use tracing::info;
 

@@ -8,10 +8,7 @@ use tracing::debug;
 
 #[tokio::main]
 pub async fn main() -> Result<()> {
-    // Create ssh key for alice
-    let mut rng = rand::rngs::OsRng;
-
-    let alice_ssh_key = ssh_key::PrivateKey::random(&mut rng, Algorithm::Ed25519)?;
+    let alice_ssh_key = ssh_key::PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519)?;
 
     println!("SSH Key: {}", alice_ssh_key.public_key().to_openssh()?);
 

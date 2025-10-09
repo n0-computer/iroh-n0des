@@ -9,7 +9,6 @@ use iroh::{Endpoint, NodeAddr, NodeId};
 use iroh_metrics::{Registry, encoding::Encoder};
 use irpc_iroh::IrohRemoteConnection;
 use n0_future::task::AbortOnDropHandle;
-use rand::Rng;
 use rcan::Rcan;
 use tracing::warn;
 use uuid::Uuid;
@@ -129,7 +128,7 @@ impl From<irpc::Error> for BuildError {
     fn from(value: irpc::Error) -> Self {
         match value {
             irpc::Error::Request(irpc::RequestError::Connection(
-                crate::iroh::endpoint::ConnectionError::ApplicationClosed(frame),
+                iroh::endpoint::ConnectionError::ApplicationClosed(frame),
             )) if frame.error_code == 401u32.into() => Self::Unauthorized,
             value => Self::Rpc(value),
         }
@@ -153,7 +152,7 @@ impl Client {
 
     /// Pings the remote node.
     pub async fn ping(&mut self) -> Result<(), Error> {
-        let req = rand::thread_rng().r#gen();
+        let req = rand::random();
         let pong = self.client.rpc(Ping { req }).await?;
         if pong.req == req {
             Ok(())

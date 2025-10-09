@@ -1,17 +1,14 @@
-#[cfg(any(feature = "iroh_main", feature = "iroh_v035"))]
 mod tests {
     use std::sync::Arc;
 
     use anyhow::{Result, ensure};
-    use iroh_metrics::Counter;
-    use iroh_n0des::{
-        iroh::{
-            Endpoint, NodeAddr,
-            endpoint::Connection,
-            protocol::{ProtocolHandler, Router},
-        },
-        simulation::{proto::TraceClient, *},
+    use iroh::{
+        Endpoint, NodeAddr,
+        endpoint::Connection,
+        protocol::{ProtocolHandler, Router},
     };
+    use iroh_metrics::Counter;
+    use iroh_n0des::simulation::{proto::TraceClient, *};
     use rand::seq::IteratorRandom;
     use tracing::{debug, instrument};
 
@@ -31,15 +28,6 @@ mod tests {
         pub pings_recv: Counter,
     }
 
-    #[cfg(feature = "iroh_v035")]
-    impl ProtocolHandler for Ping {
-        fn accept(&self, connection: Connection) -> n0_future::future::Boxed<Result<()>> {
-            let this = self.clone();
-            Box::pin(async move { this.accept(connection).await })
-        }
-    }
-
-    #[cfg(all(feature = "iroh_main", not(feature = "iroh_v035")))]
     impl ProtocolHandler for Ping {
         async fn accept(&self, connection: Connection) -> Result<(), iroh::protocol::AcceptError> {
             self.accept(connection)
@@ -126,16 +114,13 @@ mod tests {
         async fn tick(node: &mut PingNode, ctx: &RoundContext<'_>) -> Result<bool> {
             let me = ctx.try_self_addr()?.node_id;
 
-            let target = ctx
-                .all_other_nodes(me)
-                .choose(&mut rand::thread_rng())
-                .unwrap();
+            let target = ctx.all_other_nodes(me).choose(&mut rand::rng()).unwrap();
             node.ping(target.clone()).await?;
 
             // record event for simulation visualization.
             iroh_n0des::simulation::events::event_start(
-                me.fmt_short(),
-                target.node_id.fmt_short(),
+                me.fmt_short().to_string(),
+                target.node_id.fmt_short().to_string(),
                 format!("send ping (round {})", ctx.round()),
                 Some(EVENT_ID.to_string()),
             );
