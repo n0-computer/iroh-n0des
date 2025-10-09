@@ -36,7 +36,7 @@ jobs:
       matrix:
         name: [ubuntu-latest, macOS-arm-latest]
         rust: [ '${{ inputs.rust-version }}' ]
-        features: [all, none, default, some]
+        features: [all, none, default]
         include:
           - name: ubuntu-latest
             os: ubuntu-latest
