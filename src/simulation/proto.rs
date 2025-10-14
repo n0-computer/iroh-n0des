@@ -251,6 +251,10 @@ impl TraceClient {
         }
     }
 
+    pub fn from_client(client: irpc::Client<TraceProtocol>, session_id: Uuid) -> Self {
+        Self { client, session_id }
+    }
+
     pub fn from_env_or_local() -> Result<Self> {
         Ok(Self::from_env()?.unwrap_or_else(Self::local))
     }
@@ -259,10 +263,7 @@ impl TraceClient {
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         LocalActor::spawn(rx);
         let session_id = Uuid::now_v7();
-        Self {
-            client: irpc::Client::from(tx),
-            session_id,
-        }
+        Self::from_client(tx.into(), session_id)
     }
 
     pub fn connect_quinn_insecure(remote: SocketAddr, session_id: Uuid) -> Result<Self> {
