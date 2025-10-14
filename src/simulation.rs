@@ -923,10 +923,10 @@ where
         .with_context(|| format!("simulation builder function `{name}` failed"))?
         .build(name)
         .await
-        .with_context(|| format!("simulation `{name}` failed to build"))?
+        .with_context(|| format!("simulation `{name}` failed to start"))?
         .run()
         .await
-        .with_context(|| format!("simulation `{name}` failed to run"));
+        .with_context(|| format!("simulation `{name}` failed to complete"));
 
     match &result {
         Ok(()) => eprintln!("simulation `{name}` passed"),

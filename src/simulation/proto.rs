@@ -265,6 +265,10 @@ impl TraceClient {
         }
     }
 
+    pub fn new(client: irpc::Client<TraceProtocol>, session_id: Uuid) -> Self {
+        Self { client, session_id }
+    }
+
     pub fn connect_quinn_insecure(remote: SocketAddr, session_id: Uuid) -> Result<Self> {
         let addr_localhost = "127.0.0.1:0".parse().unwrap();
         let endpoint = make_insecure_client_endpoint(addr_localhost)?;
