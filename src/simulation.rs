@@ -240,8 +240,9 @@ impl<'a, C: Ctx> RoundContext<'a, C> {
 /// Provides basic functionality for nodes including optional endpoint access
 /// and cleanup on shutdown.
 ///
-/// For a node to be usable in a simulation, you also need to implement [`Spawn`]
-/// for your node struct.
+/// To use a node in a simulation, implement this trait for your type and
+/// provide an async `spawn` function. Add the node to a simulation with
+/// `NodeBuilder::new(round_fn)` and `Builder::spawn(...)`.
 pub trait Node<C: Ctx = ()>: Send + 'static + Sized {
     /// Returns a reference to this node's endpoint, if any.
     fn endpoint(&self) -> Option<&Endpoint>;
@@ -688,9 +689,9 @@ impl<C: Ctx> Builder<C> {
     ///
     /// Each node will be created using the provided node builder configuration.
     ///
-    /// You can create a [`NodeBuilder`] from any type that implements [`Spawn<D>`] where
-    /// `D` is the type returned from [`Self::with_setup`]. If you are not using the setup
-    /// step, `D` defaults to the unit type `()`.
+    /// Create a [`NodeBuilder`] with `NodeBuilder::new(round_fn)` for any type
+    /// that implements [`Node<C>`]. Shared setup data is provided via your
+    /// [`Ctx`] implementation (`Ctx::setup`), not via a builder closure.
     pub fn spawn<N: Node<C>>(
         mut self,
         node_count: u32,
