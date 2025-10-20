@@ -3,7 +3,7 @@ mod tests {
 
     use anyhow::Result;
     use iroh::Endpoint;
-    use iroh_n0des::simulation::{Builder, Node, RoundContext, Spawn, SpawnContext};
+    use iroh_n0des::simulation::{Builder, Ctx, Node, NodeBuilder, RoundContext, SpawnContext};
     use serde::{Deserialize, Serialize};
     use tracing::info;
 
@@ -12,12 +12,23 @@ mod tests {
         topic_id: u64,
     }
 
+    impl Ctx for Data {
+        type Config = ();
+        type Setup = Self;
+
+        async fn setup(_config: &Self::Config) -> Result<Self::Setup> {
+            Ok(Self { topic_id: 123 })
+        }
+    }
+
     #[derive(Debug)]
     struct BootstrapNode;
 
-    impl Node for BootstrapNode {}
+    impl Node<Data> for BootstrapNode {
+        fn endpoint(&self) -> Option<&Endpoint> {
+            None
+        }
 
-    impl Spawn<Data> for BootstrapNode {
         async fn spawn(_context: &mut SpawnContext<'_, Data>) -> Result<Self> {
             Ok(BootstrapNode)
         }
@@ -28,16 +39,13 @@ mod tests {
         endpoint: Endpoint,
     }
 
-    impl Node for ClientNode {
+    impl Node<Data> for ClientNode {
         fn endpoint(&self) -> Option<&Endpoint> {
             Some(&self.endpoint)
         }
-    }
-
-    impl Spawn<Data> for ClientNode {
         async fn spawn(context: &mut SpawnContext<'_, Data>) -> Result<Self> {
             let endpoint = context.bind_endpoint().await?;
-            Ok(ClientNode { endpoint })
+            Ok(Self { endpoint })
         }
     }
 
@@ -66,9 +74,9 @@ mod tests {
             );
             Ok(true)
         }
-        let builder = Builder::with_setup(async || Ok(Data { topic_id: 22 }))
-            .spawn(2, BootstrapNode::builder(round_bootstrap))
-            .spawn(8, ClientNode::builder(round_client))
+        let builder = Builder::new()
+            .spawn(2, NodeBuilder::new(round_bootstrap))
+            .spawn(8, NodeBuilder::new(round_client))
             .rounds(4);
 
         Ok(builder)

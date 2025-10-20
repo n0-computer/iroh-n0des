@@ -89,8 +89,6 @@ mod tests {
             self.router.shutdown().await?;
             Ok(())
         }
-    }
-    impl Spawn for PingNode {
         async fn spawn(context: &mut SpawnContext<'_>) -> Result<Self> {
             let ping = Ping::default();
             context.metrics_registry().register(ping.metrics.clone());
@@ -134,7 +132,7 @@ mod tests {
         }
 
         Ok(Builder::new()
-            .spawn(4, PingNode::builder(tick).check(check))
+            .spawn(4, NodeBuilder::new(tick).check(check))
             .rounds(3))
     }
 

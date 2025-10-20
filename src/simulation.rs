@@ -41,23 +41,20 @@ pub const ENV_TRACE_SESSION_ID: &str = "N0DES_SESSION_ID";
 
 const METRICS_INTERVAL: Duration = Duration::from_secs(1);
 
-type BoxedSetupFn<D> = Box<dyn 'static + Send + Sync + FnOnce() -> BoxFuture<'static, Result<D>>>;
-
-type BoxedSpawnFn<D> = Arc<
+type BoxedSpawnFn<C> = Arc<
     dyn 'static
         + Send
         + Sync
-        + for<'a> Fn(&'a mut SpawnContext<'a, D>) -> BoxFuture<'a, Result<BoxNode>>,
+        + for<'a> Fn(&'a mut SpawnContext<'a, C>) -> BoxFuture<'a, Result<BoxNode<C>>>,
 >;
-type BoxedRoundFn<D> = Arc<
+type BoxedRoundFn<C> = Arc<
     dyn 'static
         + Send
         + Sync
-        + for<'a> Fn(&'a mut BoxNode, &'a RoundContext<'a, D>) -> BoxFuture<'a, Result<bool>>,
+        + for<'a> Fn(&'a mut BoxNode<C>, &'a RoundContext<'a, C>) -> BoxFuture<'a, Result<bool>>,
 >;
-type RoundLabelFn<D> = Arc<dyn 'static + Send + Sync + for<'a> Fn(&'a D, u32) -> Option<String>>;
 
-type BoxedCheckFn<D> = Arc<dyn Fn(&BoxNode, &RoundContext<'_, D>) -> Result<()>>;
+type BoxedCheckFn<C> = Arc<dyn Fn(&BoxNode<C>, &RoundContext<'_, C>) -> Result<()>>;
 
 /// Helper trait for async functions.
 ///
@@ -87,26 +84,51 @@ pub trait SetupData: Serialize + DeserializeOwned + Send + Sync + Clone + Debug 
 impl<T> SetupData for T where T: Serialize + DeserializeOwned + Send + Sync + Clone + Debug + 'static
 {}
 
+pub trait Ctx: Send + Sync + 'static {
+    type Config: SetupData + Default;
+    type Setup: SetupData;
+
+    /// Runs once for each simulation environment.
+    fn setup(config: &Self::Config) -> impl Future<Output = Result<Self::Setup>> + Send;
+
+    fn round_label(_config: &Self::Config, _round: u32) -> Option<String> {
+        None
+    }
+}
+
+impl Ctx for () {
+    type Config = ();
+    type Setup = ();
+
+    async fn setup(_config: &Self::Config) -> Result<Self::Setup> {
+        Ok(())
+    }
+}
+
 /// Context provided when spawning a new simulation node.
 ///
 /// Contains all the necessary information and resources for initializing
 /// a node, including its index, the shared setup data, and a metrics registry.
-pub struct SpawnContext<'a, D = ()> {
+pub struct SpawnContext<'a, C: Ctx = ()> {
+    ctx: &'a StaticCtx<C>,
     secret_key: SecretKey,
     node_idx: u32,
-    setup_data: &'a D,
     registry: &'a mut Registry,
 }
 
-impl<'a, D: SetupData> SpawnContext<'a, D> {
+impl<'a, C: Ctx> SpawnContext<'a, C> {
     /// Returns the index of this node in the simulation.
     pub fn node_index(&self) -> u32 {
         self.node_idx
     }
 
     /// Returns a reference to the setup data for this simulation.
-    pub fn setup_data(&self) -> &D {
-        self.setup_data
+    pub fn setup_data(&self) -> &C::Setup {
+        &self.ctx.setup
+    }
+
+    pub fn config(&self) -> &C::Config {
+        &self.ctx.config
     }
 
     /// Returns a mutable reference to a metrics registry.
@@ -145,14 +167,14 @@ impl<'a, D: SetupData> SpawnContext<'a, D> {
 ///
 /// Contains information about the current round, this node's identity,
 /// the shared setup data, and the addresses of all participating nodes.
-pub struct RoundContext<'a, D = ()> {
+pub struct RoundContext<'a, C: Ctx = ()> {
     round: u32,
     node_index: u32,
-    setup_data: &'a D,
     all_nodes: &'a Vec<NodeInfoWithAddr>,
+    ctx: &'a StaticCtx<C>,
 }
 
-impl<'a, D> RoundContext<'a, D> {
+impl<'a, C: Ctx> RoundContext<'a, C> {
     /// Returns the current round number.
     pub fn round(&self) -> u32 {
         self.round
@@ -164,8 +186,12 @@ impl<'a, D> RoundContext<'a, D> {
     }
 
     /// Returns a reference to the shared setup data for this simulation.
-    pub fn setup_data(&self) -> &D {
-        self.setup_data
+    pub fn setup_data(&self) -> &C::Setup {
+        &self.ctx.setup
+    }
+
+    pub fn config(&self) -> &C::Config {
+        &self.ctx.config
     }
 
     /// Returns an iterator over the addresses of all nodes except the specified one.
@@ -209,60 +235,6 @@ impl<'a, D> RoundContext<'a, D> {
     }
 }
 
-/// Trait for types that can be spawned as simulation nodes.
-///
-/// This trait is generic over `D: SetupData`, which is the type returned from the
-/// user-defined setup function (see [`Builder::with_setup`]). If not using the setup
-/// step, `D` defaults to the unit type `()`.
-///
-/// Implement this trait on your node type to be able to spawn the node in a simulation
-/// context. The only required method is [`Spawn::spawn`], which must return your spawned node.
-pub trait Spawn<D: SetupData = ()>: Node + 'static {
-    /// Spawns a new instance of this node type.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the node fails to initialize properly.
-    fn spawn(context: &mut SpawnContext<'_, D>) -> impl Future<Output = Result<Self>> + Send
-    where
-        Self: Sized;
-
-    fn round_label(_setup_data: &D, _round: u32) -> Option<String> {
-        None
-    }
-
-    /// Spawns a new instance as a dynamically-typed node.
-    ///
-    /// This calls `spawn` and boxes the result.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the node fails to initialize properly.
-    fn spawn_dyn<'a>(context: &'a mut SpawnContext<'a, D>) -> BoxFuture<'a, Result<BoxNode>>
-    where
-        Self: Sized,
-    {
-        Box::pin(async move {
-            let node = Self::spawn(context).await?;
-            let node: Box<dyn DynNode> = Box::new(node);
-            anyhow::Ok(node)
-        })
-    }
-
-    /// Creates a new builder for this node type with the given round function.
-    ///
-    /// The round function will be called each simulation round and should return
-    /// `Ok(true)` to continue or `Ok(false)` to stop early.
-    fn builder(
-        round_fn: impl for<'a> AsyncCallback<'a, Self, RoundContext<'a, D>, Result<bool>>,
-    ) -> NodeBuilder<Self, D>
-    where
-        Self: Sized,
-    {
-        NodeBuilder::new(round_fn)
-    }
-}
-
 /// Trait for simulation node implementations.
 ///
 /// Provides basic functionality for nodes including optional endpoint access
@@ -270,13 +242,9 @@ pub trait Spawn<D: SetupData = ()>: Node + 'static {
 ///
 /// For a node to be usable in a simulation, you also need to implement [`Spawn`]
 /// for your node struct.
-pub trait Node: Send + 'static {
+pub trait Node<C: Ctx = ()>: Send + 'static + Sized {
     /// Returns a reference to this node's endpoint, if any.
-    ///
-    /// The default implementation returns `None`.
-    fn endpoint(&self) -> Option<&Endpoint> {
-        None
-    }
+    fn endpoint(&self) -> Option<&Endpoint>;
 
     /// Shuts down this node, performing any necessary cleanup.
     ///
@@ -288,18 +256,44 @@ pub trait Node: Send + 'static {
     fn shutdown(&mut self) -> impl Future<Output = Result<()>> + Send + '_ {
         async { Ok(()) }
     }
+
+    /// Spawns a new instance of this node type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node fails to initialize properly.
+    fn spawn(context: &mut SpawnContext<'_, C>) -> impl Future<Output = Result<Self>> + Send;
+
+    /// Spawns a new instance as a dynamically-typed node.
+    ///
+    /// This calls `spawn` and boxes the result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node fails to initialize properly.
+    fn spawn_dyn<'a>(context: &'a mut SpawnContext<'_, C>) -> BoxFuture<'a, Result<BoxNode<C>>> {
+        Box::pin(async {
+            let node = Self::spawn(context).await?;
+            let node: Box<dyn DynNode<C>> = Box::new(node);
+            anyhow::Ok(node)
+        })
+    }
+
+    fn node_label(&self, _context: &SpawnContext<C>) -> Option<String> {
+        None
+    }
 }
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A boxed dynamically-typed simulation node.
-pub type BoxNode = Box<dyn DynNode>;
+pub type BoxNode<C> = Box<dyn DynNode<C> + 'static>;
 
 /// Trait for dynamically-typed simulation nodes.
 ///
 /// This trait enables type erasure for nodes while preserving essential
 /// functionality like shutdown, endpoint access, and type casting.
-pub trait DynNode: Send + Any + 'static {
+pub trait DynNode<C: Ctx>: Send + Any + 'static {
     /// Shuts down this node, performing any necessary cleanup.
     ///
     /// The default implementation does nothing and returns success.
@@ -318,7 +312,7 @@ pub trait DynNode: Send + Any + 'static {
         None
     }
 
-    fn round_label(&self, _round: u32) -> Option<String> {
+    fn node_label(&self, _context: &SpawnContext<C>) -> Option<String> {
         None
     }
 
@@ -329,13 +323,17 @@ pub trait DynNode: Send + Any + 'static {
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
-impl<T: Node + Sized> DynNode for T {
+impl<C: Ctx, N: Node<C> + Sized> DynNode<C> for N {
     fn shutdown(&mut self) -> BoxFuture<'_, Result<()>> {
-        Box::pin(<Self as Node>::shutdown(self))
+        Box::pin(<Self as Node<C>>::shutdown(self))
     }
 
     fn endpoint(&self) -> Option<&Endpoint> {
-        <Self as Node>::endpoint(self)
+        <Self as Node<C>>::endpoint(self)
+    }
+
+    fn node_label(&self, context: &SpawnContext<C>) -> Option<String> {
+        <Self as Node<C>>::node_label(self, context)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -352,65 +350,74 @@ impl<T: Node + Sized> DynNode for T {
 ///
 /// Allows configuring the setup function, node spawners, and number of rounds
 /// before building the final simulation.
-pub struct Builder<D = ()> {
-    setup_fn: BoxedSetupFn<D>,
-    node_builders: Vec<NodeBuilderWithCount<D>>,
+pub struct Builder<C: Ctx = ()> {
+    config: C::Config,
+    node_builders: Vec<NodeBuilderWithCount<C>>,
     rounds: u32,
 }
 
-#[derive(Clone)]
+struct SimFns<C: Ctx> {
+    spawn: BoxedSpawnFn<C>,
+    round: BoxedRoundFn<C>,
+    check: Option<BoxedCheckFn<C>>,
+}
+
+impl<C: Ctx> Clone for SimFns<C> {
+    fn clone(&self) -> Self {
+        Self {
+            round: self.round.clone(),
+            check: self.check.clone(),
+            spawn: self.spawn.clone(),
+        }
+    }
+}
+
 /// Builder for configuring individual nodes in a simulation.
 ///
 /// Provides methods to set up spawn functions, round functions, and optional
 /// check functions for a specific node type.
-pub struct NodeBuilder<N, D> {
-    phantom: PhantomData<N>,
-    spawn_fn: BoxedSpawnFn<D>,
-    round_fn: BoxedRoundFn<D>,
-    round_label_fn: RoundLabelFn<D>,
-    check_fn: Option<BoxedCheckFn<D>>,
-}
-
 #[derive(Clone)]
-struct ErasedNodeBuilder<D> {
-    spawn_fn: BoxedSpawnFn<D>,
-    round_fn: BoxedRoundFn<D>,
-    round_label_fn: RoundLabelFn<D>,
-    check_fn: Option<BoxedCheckFn<D>>,
+pub struct NodeBuilder<N: Node<C>, C: Ctx> {
+    phantom: PhantomData<N>,
+    fns: SimFns<C>,
 }
 
-impl<T, N: Spawn<D>, D: SetupData> From<T> for NodeBuilder<N, D>
-where
-    T: for<'a> AsyncCallback<'a, N, RoundContext<'a, D>, Result<bool>>,
-{
-    fn from(value: T) -> Self {
-        Self::new(value)
+struct ErasedNodeBuilder<C: Ctx> {
+    fns: SimFns<C>,
+}
+
+impl<C: Ctx> Clone for ErasedNodeBuilder<C> {
+    fn clone(&self) -> Self {
+        Self {
+            fns: self.fns.clone(),
+        }
     }
 }
 
-impl<N: Spawn<D>, D: SetupData> NodeBuilder<N, D> {
+impl<N: Node<C>, C: Ctx> NodeBuilder<N, C> {
     /// Creates a new node builder with the given round function.
     ///
     /// The round function will be called each simulation round and should return
     /// `Ok(true)` to continue or `Ok(false)` to stop early.
     pub fn new(
-        round_fn: impl for<'a> AsyncCallback<'a, N, RoundContext<'a, D>, Result<bool>>,
+        round_fn: impl for<'a> AsyncCallback<'a, N, RoundContext<'a, C>, Result<bool>>,
     ) -> Self {
-        let spawn_fn: BoxedSpawnFn<D> = Arc::new(N::spawn_dyn);
-        let round_label_fn: RoundLabelFn<D> = Arc::new(N::round_label);
-        let round_fn: BoxedRoundFn<D> = Arc::new(move |node, context| {
+        let spawn_fn: BoxedSpawnFn<C> = Arc::new(N::spawn_dyn);
+        let round_fn: BoxedRoundFn<C> = Arc::new(move |node, context| {
             let node = node
                 .as_any_mut()
                 .downcast_mut::<N>()
                 .expect("unreachable: type is statically guaranteed");
             Box::pin(round_fn(node, context))
         });
+        let fns = SimFns {
+            spawn: spawn_fn,
+            round: round_fn,
+            check: None,
+        };
         Self {
             phantom: PhantomData,
-            spawn_fn,
-            round_fn,
-            check_fn: None,
-            round_label_fn,
+            fns,
         }
     }
 
@@ -424,36 +431,30 @@ impl<N: Spawn<D>, D: SetupData> NodeBuilder<N, D> {
     /// The check function should return an error if validation fails.
     pub fn check(
         mut self,
-        check_fn: impl 'static + for<'a> Fn(&'a N, &RoundContext<'a, D>) -> Result<()>,
+        check_fn: impl 'static + for<'a> Fn(&'a N, &RoundContext<'a, C>) -> Result<()>,
     ) -> Self {
-        let check_fn: BoxedCheckFn<D> = Arc::new(move |node, context| {
+        let check_fn: BoxedCheckFn<C> = Arc::new(move |node, context| {
             let node = node
                 .as_any()
                 .downcast_ref::<N>()
                 .expect("unreachable: type is statically guaranteed");
             check_fn(node, context)
         });
-        self.check_fn = Some(check_fn);
+        self.fns.check = Some(check_fn);
         self
     }
 
-    fn erase(self) -> ErasedNodeBuilder<D> {
-        ErasedNodeBuilder {
-            spawn_fn: self.spawn_fn,
-            round_fn: self.round_fn,
-            check_fn: self.check_fn,
-            round_label_fn: self.round_label_fn,
-        }
+    fn erase(self) -> ErasedNodeBuilder<C> {
+        ErasedNodeBuilder { fns: self.fns }
     }
 }
 
-struct SimNode<D> {
-    node: BoxNode,
-    trace_id: Uuid,
+struct SimNode<'a, C: Ctx> {
+    node: BoxNode<C>,
+    ctx: &'a StaticCtx<C>,
+    client: ActiveTrace,
     idx: u32,
-    round_fn: BoxedRoundFn<D>,
-    check_fn: Option<BoxedCheckFn<D>>,
-    round_label_fn: RoundLabelFn<D>,
+    fns: SimFns<C>,
     round: u32,
     info: NodeInfo,
     metrics: Arc<RwLock<Registry>>,
@@ -461,51 +462,56 @@ struct SimNode<D> {
     all_nodes: Vec<NodeInfoWithAddr>,
 }
 
-impl<D: SetupData> SimNode<D> {
-    async fn spawn_and_run(
-        builder: NodeBuilderWithIdx<D>,
-        client: TraceClient,
-        trace_id: Uuid,
-        setup_data: &D,
-        rounds: u32,
-    ) -> Result<()> {
+impl<'a, C: Ctx> SimNode<'a, C> {
+    async fn spawn_and_run(builder: NodeBuilderWithIdx<C>, ctx: &'a StaticCtx<C>) -> Result<()> {
         let secret_key = SecretKey::generate(&mut rand::rng());
         let NodeBuilderWithIdx { node_idx, builder } = builder;
-        let info = NodeInfo {
-            // TODO: Only assign node id if endpoint was created.
-            node_id: Some(secret_key.public()),
-            idx: node_idx,
-            label: None,
-        };
         let mut registry = Registry::default();
-        let mut context = SpawnContext {
-            setup_data,
+        let node_id = secret_key.public();
+        let mut context = SpawnContext::<C> {
+            ctx,
             node_idx,
-            secret_key,
+            secret_key: secret_key.clone(),
             registry: &mut registry,
         };
-        let node = (builder.spawn_fn)(&mut context).await?;
+        let node = (builder.fns.spawn)(&mut context).await?;
+
+        // TODO: Borrow checker forces to recreate the context, I think this can be avoided but can't figure it out.
+        let context = SpawnContext::<C> {
+            ctx,
+            node_idx,
+            secret_key: secret_key.clone(),
+            registry: &mut registry,
+        };
+        let label = node.node_label(&context);
+
+        let info = NodeInfo {
+            // TODO: Only assign node id if endpoint was created.
+            node_id: Some(node_id),
+            idx: node_idx,
+            label,
+        };
 
         if let Some(endpoint) = node.endpoint() {
             registry.register_all(endpoint.metrics());
         }
+        let client = ctx.client.start_node(ctx.trace_id, info.clone()).await?;
 
         let mut node = Self {
             node,
-            trace_id,
+            ctx,
+            client,
             idx: node_idx,
             info,
             round: 0,
-            round_fn: builder.round_fn,
-            check_fn: builder.check_fn,
-            round_label_fn: builder.round_label_fn,
+            fns: builder.fns,
             checkpoint_watcher: Watchable::new(0),
             metrics: Arc::new(RwLock::new(registry)),
             all_nodes: Default::default(),
         };
 
         let res = node
-            .run(&client, setup_data, rounds)
+            .run()
             .await
             .with_context(|| format!("node {} failed", node.idx));
         if let Err(err) = &res {
@@ -514,14 +520,12 @@ impl<D: SetupData> SimNode<D> {
         res
     }
 
-    async fn run(&mut self, client: &TraceClient, setup_data: &D, rounds: u32) -> Result<()> {
-        let client = client.start_node(self.trace_id, self.info.clone()).await?;
-
+    async fn run(&mut self) -> Result<()> {
         info!(idx = self.idx, "start");
 
         // Spawn a task to periodically put metrics.
         if let Some(node_id) = self.node_id() {
-            let client = client.clone();
+            let client = self.client.clone();
             let mut watcher = self.checkpoint_watcher.watch();
             let mut metrics_encoder = Encoder::new(self.metrics.clone());
             tokio::task::spawn(
@@ -555,29 +559,23 @@ impl<D: SetupData> SimNode<D> {
             addr: self.my_addr().await,
             info: self.info.clone(),
         };
-        let all_nodes = client.wait_start(info).await?;
-        self.all_nodes = all_nodes;
+        self.all_nodes = self.client.wait_start(info).await?;
 
-        let result = self.run_rounds(&client, setup_data, rounds).await;
+        let result = self.run_rounds().await;
 
         if let Err(err) = self.node.shutdown().await {
             warn!("failure during node shutdown: {err:#}");
         }
 
-        client.end(to_str_err(&result)).await?;
+        self.client.end(to_str_err(&result)).await?;
 
         result
     }
 
-    async fn run_rounds(
-        &mut self,
-        client: &ActiveTrace,
-        setup_data: &D,
-        rounds: u32,
-    ) -> Result<()> {
-        while self.round < rounds {
+    async fn run_rounds(&mut self) -> Result<()> {
+        while self.round < self.ctx.max_rounds {
             if !self
-                .run_round(client, setup_data)
+                .run_round()
                 .await
                 .with_context(|| format!("failed at round {}", self.round))?
             {
@@ -589,20 +587,20 @@ impl<D: SetupData> SimNode<D> {
     }
 
     #[tracing::instrument(name="round", skip_all, fields(round=self.round))]
-    async fn run_round(&mut self, client: &ActiveTrace, setup_data: &D) -> Result<bool> {
+    async fn run_round(&mut self) -> Result<bool> {
         let context = RoundContext {
             round: self.round,
             node_index: self.idx,
-            setup_data,
             all_nodes: &self.all_nodes,
+            ctx: self.ctx,
         };
 
-        let label = (self.round_label_fn)(setup_data, self.round)
+        let label = C::round_label(&self.ctx.config, self.round)
             .unwrap_or_else(|| format!("Round {}", self.round));
 
         info!(%label, "start round");
 
-        let result = (self.round_fn)(&mut self.node, &context)
+        let result = (self.fns.round)(&mut self.node, &context)
             .await
             .context("round function failed");
 
@@ -610,19 +608,19 @@ impl<D: SetupData> SimNode<D> {
 
         let checkpoint = (context.round + 1) as u64;
         self.checkpoint_watcher.set(checkpoint).ok();
-        client
+        self.client
             .put_checkpoint(checkpoint, Some(label), to_str_err(&result))
             .await
             .context("put checkpoint")?;
 
-        client
+        self.client
             .wait_checkpoint(checkpoint)
             .await
             .context("wait checkpoint")?;
 
         match result {
             Ok(out) => {
-                if let Some(check_fn) = self.check_fn.as_ref() {
+                if let Some(check_fn) = self.fns.check.as_ref() {
                     (check_fn)(&self.node, &context).context("check function failed")?;
                 }
                 Ok(out)
@@ -655,21 +653,10 @@ impl Default for Builder<()> {
     }
 }
 
-impl Builder<()> {
-    /// Creates a new simulation builder with empty setup data.
-    pub fn new() -> Builder<()> {
-        let setup_fn: BoxedSetupFn<()> = Box::new(move || Box::pin(async move { Ok(()) }));
-        Builder {
-            node_builders: Vec::new(),
-            setup_fn,
-            rounds: 0,
-        }
-    }
-}
-impl<D: SetupData> Builder<D> {
-    /// Creates a new simulation builder with a setup function for setup data.
+impl<C: Ctx> Builder<C> {
+    /// Creates a new simulation builder.
     ///
-    /// The setup function is called once before the simulation starts to
+    /// The context's setup function is called once before the simulation starts to
     /// initialize the setup data that will be shared across all nodes.
     ///
     /// The setup function can return any type that implements [`SetupData`],
@@ -679,15 +666,14 @@ impl<D: SetupData> Builder<D> {
     /// # Errors
     ///
     /// The setup function should return an error if initialization fails.
-    pub fn with_setup<F, Fut>(setup_fn: F) -> Builder<D>
-    where
-        F: 'static + Send + Sync + FnOnce() -> Fut,
-        Fut: 'static + Send + Future<Output = Result<D>>,
-    {
-        let setup_fn: BoxedSetupFn<D> = Box::new(move || Box::pin(setup_fn()));
-        Builder {
-            node_builders: Vec::new(),
-            setup_fn,
+    pub fn new() -> Self {
+        Self::with_config(Default::default())
+    }
+
+    pub fn with_config(config: C::Config) -> Self {
+        Self {
+            config,
+            node_builders: vec![],
             rounds: 0,
         }
     }
@@ -705,15 +691,15 @@ impl<D: SetupData> Builder<D> {
     /// You can create a [`NodeBuilder`] from any type that implements [`Spawn<D>`] where
     /// `D` is the type returned from [`Self::with_setup`]. If you are not using the setup
     /// step, `D` defaults to the unit type `()`.
-    pub fn spawn<N: Spawn<D>>(
+    pub fn spawn<N: Node<C>>(
         mut self,
         node_count: u32,
-        node_builder: impl Into<NodeBuilder<N, D>>,
+        builder: impl Into<NodeBuilder<N, C>>,
     ) -> Self {
-        let node_builder = node_builder.into();
+        let builder = builder.into();
         self.node_builders.push(NodeBuilderWithCount {
             count: node_count,
-            builder: node_builder.erase(),
+            builder: builder.erase(),
         });
         self
     }
@@ -727,7 +713,7 @@ impl<D: SetupData> Builder<D> {
     ///
     /// Returns an error if setup fails, tracing initialization fails, or
     /// the configuration is invalid for the current run mode.
-    pub async fn build(self, name: &str) -> Result<Simulation<D>> {
+    pub async fn build(self, name: &str) -> Result<Simulation<C>> {
         let client = TraceClient::from_env_or_local()?;
         let run_mode = RunMode::from_env()?;
 
@@ -735,7 +721,7 @@ impl<D: SetupData> Builder<D> {
 
         let (trace_id, setup_data) = if matches!(run_mode, RunMode::InitOnly | RunMode::Integrated)
         {
-            let setup_data = (self.setup_fn)().await?;
+            let setup_data = C::setup(&self.config).await?;
             let encoded_setup_data = Bytes::from(postcard::to_stdvec(&setup_data)?);
             let node_count = self.node_builders.iter().map(|builder| builder.count).sum();
             let trace_id = client
@@ -760,66 +746,75 @@ impl<D: SetupData> Builder<D> {
             } = info;
             info!(%name, node_count=info.node_count, %trace_id, "get simulation");
             let setup_data = setup_data.context("expected setup data to be set")?;
-            let setup_data: D =
+            let setup_data: C::Setup =
                 postcard::from_bytes(&setup_data).context("failed to decode setup data")?;
             (trace_id, setup_data)
         };
 
-        let mut node_builders = self
+        // map all the builders with their count into a flat iter of (i, builder)
+        let mut builders = self
             .node_builders
-            .into_iter()
-            .flat_map(|builder| (0..builder.count).map(move |_| builder.builder.clone()))
-            .enumerate()
-            .map(|(node_idx, builder)| NodeBuilderWithIdx {
-                node_idx: node_idx as u32,
-                builder,
-            });
+            .iter()
+            .flat_map(|builder| (0..builder.count).map(|_| &builder.builder))
+            .enumerate();
 
+        // build the list of builders *we* want to run:
         let node_builders: Vec<_> = match run_mode {
+            // init only: run nothing
             RunMode::InitOnly => vec![],
-            RunMode::Integrated => node_builders.collect(),
-            RunMode::Isolated(idx) => vec![
-                node_builders
+            // integrated: run all nodes
+            RunMode::Integrated => builders.map(NodeBuilderWithIdx::from_tuple).collect(),
+            // isolated: run single node
+            RunMode::Isolated(idx) => {
+                let item = builders
                     .nth(idx as usize)
-                    .context("invalid isolated index")?,
-            ],
+                    .context("invalid isolated index")?;
+                vec![NodeBuilderWithIdx::from_tuple(item)]
+            }
         };
 
-        Ok(Simulation {
+        let ctx = StaticCtx {
+            setup: setup_data,
+            config: self.config,
+            trace_id,
+            client,
             run_mode,
             max_rounds: self.rounds,
-            node_builders,
-            client,
-            trace_id,
-            setup_data,
-        })
+        };
+
+        Ok(Simulation { node_builders, ctx })
     }
 }
 
-struct NodeBuilderWithCount<D> {
+struct NodeBuilderWithCount<C: Ctx> {
     count: u32,
-    builder: ErasedNodeBuilder<D>,
+    builder: ErasedNodeBuilder<C>,
 }
 
-struct NodeBuilderWithIdx<D> {
+struct NodeBuilderWithIdx<C: Ctx> {
     node_idx: u32,
-    builder: ErasedNodeBuilder<D>,
+    builder: ErasedNodeBuilder<C>,
+}
+
+impl<C: Ctx> NodeBuilderWithIdx<C> {
+    fn from_tuple((node_idx, builder): (usize, &ErasedNodeBuilder<C>)) -> Self {
+        Self {
+            node_idx: node_idx as u32,
+            builder: builder.clone(),
+        }
+    }
 }
 
 /// A configured simulation ready to run.
 ///
 /// Contains all the necessary components including the setup data, node spawners,
 /// and tracing client to execute a simulation run.
-pub struct Simulation<D> {
-    trace_id: Uuid,
-    run_mode: RunMode,
-    client: TraceClient,
-    setup_data: D,
-    max_rounds: u32,
-    node_builders: Vec<NodeBuilderWithIdx<D>>,
+pub struct Simulation<C: Ctx> {
+    ctx: StaticCtx<C>,
+    node_builders: Vec<NodeBuilderWithIdx<C>>,
 }
 
-impl<D: SetupData> Simulation<D> {
+impl<C: Ctx> Simulation<C> {
     /// Runs this simulation to completion.
     ///
     /// Spawns all configured nodes concurrently and executes the specified
@@ -832,7 +827,7 @@ impl<D: SetupData> Simulation<D> {
         let cancel_token = CancellationToken::new();
 
         // Spawn a task to submit logs.
-        let logs_scope = match self.run_mode {
+        let logs_scope = match self.ctx.run_mode {
             RunMode::Isolated(idx) => Some(Scope::Isolated(idx)),
             RunMode::Integrated => Some(Scope::Integrated),
             // Do not push logs for init-only runs.
@@ -840,8 +835,8 @@ impl<D: SetupData> Simulation<D> {
         };
         let logs_task = if let Some(scope) = logs_scope {
             Some(spawn_logs_task(
-                self.client.clone(),
-                self.trace_id,
+                self.ctx.client.clone(),
+                self.ctx.trace_id,
                 scope,
                 cancel_token.clone(),
             ))
@@ -855,15 +850,9 @@ impl<D: SetupData> Simulation<D> {
             .into_iter()
             .map(async |builder| {
                 let span = error_span!("sim-node", idx = builder.node_idx);
-                SimNode::spawn_and_run(
-                    builder,
-                    self.client.clone(),
-                    self.trace_id,
-                    &self.setup_data,
-                    self.max_rounds,
-                )
-                .instrument(span)
-                .await
+                SimNode::spawn_and_run(builder, &self.ctx)
+                    .instrument(span)
+                    .await
             })
             .try_join_all()
             .await
@@ -874,14 +863,25 @@ impl<D: SetupData> Simulation<D> {
             join_handle.await?;
         }
 
-        if matches!(self.run_mode, RunMode::Integrated) {
-            self.client
-                .close_trace(self.trace_id, to_str_err(&result))
+        if matches!(self.ctx.run_mode, RunMode::Integrated) {
+            self.ctx
+                .client
+                .close_trace(self.ctx.trace_id, to_str_err(&result))
                 .await?;
         }
 
         result
     }
+}
+
+#[derive(Debug, Clone)]
+struct StaticCtx<C: Ctx> {
+    setup: C::Setup,
+    config: C::Config,
+    trace_id: Uuid,
+    client: TraceClient,
+    run_mode: RunMode,
+    max_rounds: u32,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -959,11 +959,11 @@ static PERMIT: Semaphore = Semaphore::const_new(1);
 /// Returns an error if the simulation function fails, the builder fails,
 /// or the simulation execution fails.
 #[doc(hidden)]
-pub async fn run_sim_fn<F, Fut, D, E>(name: &str, sim_fn: F) -> anyhow::Result<()>
+pub async fn run_sim_fn<F, Fut, C, E>(name: &str, sim_fn: F) -> anyhow::Result<()>
 where
     F: Fn() -> Fut,
-    Fut: Future<Output = Result<Builder<D>, E>>,
-    D: SetupData,
+    Fut: Future<Output = Result<Builder<C>, E>>,
+    C: Ctx,
     anyhow::Error: From<E>,
 {
     // Ensure simulations run sequentially so that we can extract logs properly.
