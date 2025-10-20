@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use iroh::{Endpoint, NodeAddr, NodeId, SecretKey};
+use iroh::{Endpoint, NodeAddr, NodeId, SecretKey, Watcher};
 use iroh_metrics::encoding::Encoder;
 use iroh_n0des::{
     Registry,
