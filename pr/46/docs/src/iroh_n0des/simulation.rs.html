@@ -13,10 +13,10 @@
 <a href=#13 id=13 data-nosnippet>13</a><span class="kw">use </span>iroh_metrics::encoding::Encoder;
 <a href=#14 id=14 data-nosnippet>14</a><span class="kw">use </span>iroh_n0des::{
 <a href=#15 id=15 data-nosnippet>15</a>    Registry,
-<a href=#16 id=16 data-nosnippet>16</a>    simulation::proto::{ActiveTrace, NodeInfo, TraceClient, TraceInfo},
+<a href=#16 id=16 data-nosnippet>16</a>    simulation::proto::{ActiveTrace, EndpointInfo, TraceClient, TraceInfo},
 <a href=#17 id=17 data-nosnippet>17</a>};
 <a href=#18 id=18 data-nosnippet>18</a><span class="kw">use </span>n0_future::IterExt;
-<a href=#19 id=19 data-nosnippet>19</a><span class="kw">use </span>proto::{GetTraceResponse, NodeInfoWithAddr, Scope};
+<a href=#19 id=19 data-nosnippet>19</a><span class="kw">use </span>proto::{EndpointInfoWithAddr, GetTraceResponse, Scope};
 <a href=#20 id=20 data-nosnippet>20</a><span class="kw">use </span>serde::{Serialize, de::DeserializeOwned};
 <a href=#21 id=21 data-nosnippet>21</a><span class="kw">use </span>tokio::sync::Semaphore;
 <a href=#22 id=22 data-nosnippet>22</a><span class="kw">use </span>tokio_util::sync::CancellationToken;
@@ -115,12 +115,12 @@
 <a href=#115 id=115 data-nosnippet>115</a>        <span class="self">self</span>.secret_key.clone()
 <a href=#116 id=116 data-nosnippet>116</a>    }
 <a href=#117 id=117 data-nosnippet>117</a>
-<a href=#118 id=118 data-nosnippet>118</a>    <span class="doccomment">/// Returns the node id of this node.
+<a href=#118 id=118 data-nosnippet>118</a>    <span class="doccomment">/// Returns the endpoint id of this node.
 <a href=#119 id=119 data-nosnippet>119</a>    </span><span class="kw">pub fn </span>id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; EndpointId {
 <a href=#120 id=120 data-nosnippet>120</a>        <span class="self">self</span>.secret_key.public()
 <a href=#121 id=121 data-nosnippet>121</a>    }
 <a href=#122 id=122 data-nosnippet>122</a>
-<a href=#123 id=123 data-nosnippet>123</a>    <span class="doccomment">/// Creates and binds a new endpoint with this node's secret key.
+<a href=#123 id=123 data-nosnippet>123</a>    <span class="doccomment">/// Creates and binds a new endpoint with this endpoint's secret key.
 <a href=#124 id=124 data-nosnippet>124</a>    ///
 <a href=#125 id=125 data-nosnippet>125</a>    /// # Errors
 <a href=#126 id=126 data-nosnippet>126</a>    ///
@@ -142,7 +142,7 @@
 <a href=#142 id=142 data-nosnippet>142</a>    round: u32,
 <a href=#143 id=143 data-nosnippet>143</a>    node_index: u32,
 <a href=#144 id=144 data-nosnippet>144</a>    setup_data: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>D,
-<a href=#145 id=145 data-nosnippet>145</a>    all_nodes: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Vec&lt;NodeInfoWithAddr&gt;,
+<a href=#145 id=145 data-nosnippet>145</a>    all_nodes: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>Vec&lt;EndpointInfoWithAddr&gt;,
 <a href=#146 id=146 data-nosnippet>146</a>}
 <a href=#147 id=147 data-nosnippet>147</a>
 <a href=#148 id=148 data-nosnippet>148</a><span class="kw">impl</span>&lt;<span class="lifetime">'a</span>, D&gt; RoundContext&lt;<span class="lifetime">'a</span>, D&gt; {
@@ -165,7 +165,7 @@
 <a href=#165 id=165 data-nosnippet>165</a>    </span><span class="kw">pub fn </span>all_other_nodes(<span class="kw-2">&amp;</span><span class="self">self</span>, me: EndpointId) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>EndpointAddr&gt; + <span class="lifetime">'_ </span>{
 <a href=#166 id=166 data-nosnippet>166</a>        <span class="self">self</span>.all_nodes
 <a href=#167 id=167 data-nosnippet>167</a>            .iter()
-<a href=#168 id=168 data-nosnippet>168</a>            .filter(<span class="kw">move </span>|n| n.info.id != <span class="prelude-val">Some</span>(me))
+<a href=#168 id=168 data-nosnippet>168</a>            .filter(<span class="kw">move </span>|n| n.info.endpoint_id != <span class="prelude-val">Some</span>(me))
 <a href=#169 id=169 data-nosnippet>169</a>            .flat_map(|n| <span class="kw-2">&amp;</span>n.addr)
 <a href=#170 id=170 data-nosnippet>170</a>    }
 <a href=#171 id=171 data-nosnippet>171</a>
@@ -434,9 +434,9 @@
 <a href=#434 id=434 data-nosnippet>434</a>    round_fn: BoxedRoundFn&lt;D&gt;,
 <a href=#435 id=435 data-nosnippet>435</a>    check_fn: <span class="prelude-ty">Option</span>&lt;BoxedCheckFn&lt;D&gt;&gt;,
 <a href=#436 id=436 data-nosnippet>436</a>    round: u32,
-<a href=#437 id=437 data-nosnippet>437</a>    info: NodeInfo,
+<a href=#437 id=437 data-nosnippet>437</a>    info: EndpointInfo,
 <a href=#438 id=438 data-nosnippet>438</a>    metrics_encoder: Encoder,
-<a href=#439 id=439 data-nosnippet>439</a>    all_nodes: Vec&lt;NodeInfoWithAddr&gt;,
+<a href=#439 id=439 data-nosnippet>439</a>    all_nodes: Vec&lt;EndpointInfoWithAddr&gt;,
 <a href=#440 id=440 data-nosnippet>440</a>}
 <a href=#441 id=441 data-nosnippet>441</a>
 <a href=#442 id=442 data-nosnippet>442</a><span class="kw">impl</span>&lt;D: SetupData&gt; SimNode&lt;D&gt; {
@@ -449,10 +449,10 @@
 <a href=#449 id=449 data-nosnippet>449</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
 <a href=#450 id=450 data-nosnippet>450</a>        <span class="kw">let </span>secret_key = SecretKey::generate(<span class="kw-2">&amp;mut </span>rand::rng());
 <a href=#451 id=451 data-nosnippet>451</a>        <span class="kw">let </span>NodeBuilderWithIdx { idx, builder } = builder;
-<a href=#452 id=452 data-nosnippet>452</a>        <span class="kw">let </span>info = NodeInfo {
-<a href=#453 id=453 data-nosnippet>453</a>            <span class="comment">// TODO: Only assign node id if endpoint was created.
-<a href=#454 id=454 data-nosnippet>454</a>            </span>id: <span class="prelude-val">Some</span>(secret_key.public()),
-<a href=#455 id=455 data-nosnippet>455</a>            idx: idx,
+<a href=#452 id=452 data-nosnippet>452</a>        <span class="kw">let </span>info = EndpointInfo {
+<a href=#453 id=453 data-nosnippet>453</a>            <span class="comment">// TODO: Only assign endpoint id if endpoint was created.
+<a href=#454 id=454 data-nosnippet>454</a>            </span>idx,
+<a href=#455 id=455 data-nosnippet>455</a>            endpoint_id: <span class="prelude-val">Some</span>(secret_key.public()),
 <a href=#456 id=456 data-nosnippet>456</a>            label: <span class="prelude-val">None</span>,
 <a href=#457 id=457 data-nosnippet>457</a>        };
 <a href=#458 id=458 data-nosnippet>458</a>        <span class="kw">let </span><span class="kw-2">mut </span>registry = Registry::default();
@@ -471,7 +471,7 @@
 <a href=#471 id=471 data-nosnippet>471</a>        <span class="kw">let </span><span class="kw-2">mut </span>node = <span class="self">Self </span>{
 <a href=#472 id=472 data-nosnippet>472</a>            node,
 <a href=#473 id=473 data-nosnippet>473</a>            trace_id,
-<a href=#474 id=474 data-nosnippet>474</a>            idx: idx,
+<a href=#474 id=474 data-nosnippet>474</a>            idx,
 <a href=#475 id=475 data-nosnippet>475</a>            info,
 <a href=#476 id=476 data-nosnippet>476</a>            round: <span class="number">0</span>,
 <a href=#477 id=477 data-nosnippet>477</a>            round_fn: builder.round_fn,
@@ -495,7 +495,7 @@
 <a href=#495 id=495 data-nosnippet>495</a>
 <a href=#496 id=496 data-nosnippet>496</a>        <span class="macro">info!</span>(idx = <span class="self">self</span>.idx, <span class="string">"start"</span>);
 <a href=#497 id=497 data-nosnippet>497</a>
-<a href=#498 id=498 data-nosnippet>498</a>        <span class="kw">let </span>info = NodeInfoWithAddr {
+<a href=#498 id=498 data-nosnippet>498</a>        <span class="kw">let </span>info = EndpointInfoWithAddr {
 <a href=#499 id=499 data-nosnippet>499</a>            addr: <span class="self">self</span>.my_addr().<span class="kw">await</span>,
 <a href=#500 id=500 data-nosnippet>500</a>            info: <span class="self">self</span>.info.clone(),
 <a href=#501 id=501 data-nosnippet>501</a>        };
@@ -552,7 +552,7 @@
 <a href=#552 id=552 data-nosnippet>552</a>            .put_checkpoint(checkpoint, <span class="prelude-val">Some</span>(label), to_str_err(<span class="kw-2">&amp;</span>result))
 <a href=#553 id=553 data-nosnippet>553</a>            .<span class="kw">await</span><span class="question-mark">?</span>;
 <a href=#554 id=554 data-nosnippet>554</a>
-<a href=#555 id=555 data-nosnippet>555</a>        <span class="comment">// TODO(Frando): Couple metrics to node idx, not node id.
+<a href=#555 id=555 data-nosnippet>555</a>        <span class="comment">// TODO(Frando): Couple metrics to idx, not endpoint id.
 <a href=#556 id=556 data-nosnippet>556</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(id) = <span class="self">self</span>.id() {
 <a href=#557 id=557 data-nosnippet>557</a>            client
 <a href=#558 id=558 data-nosnippet>558</a>                .put_metrics(id, <span class="prelude-val">Some</span>(checkpoint), <span class="self">self</span>.metrics_encoder.export())
@@ -573,7 +573,7 @@
 <a href=#573 id=573 data-nosnippet>573</a>    }
 <a href=#574 id=574 data-nosnippet>574</a>
 <a href=#575 id=575 data-nosnippet>575</a>    <span class="kw">fn </span>id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;EndpointId&gt; {
-<a href=#576 id=576 data-nosnippet>576</a>        <span class="self">self</span>.info.id
+<a href=#576 id=576 data-nosnippet>576</a>        <span class="self">self</span>.info.endpoint_id
 <a href=#577 id=577 data-nosnippet>577</a>    }
 <a href=#578 id=578 data-nosnippet>578</a>
 <a href=#579 id=579 data-nosnippet>579</a>    <span class="kw">async fn </span>my_addr(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;EndpointAddr&gt; {
