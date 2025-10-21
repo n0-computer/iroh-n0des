@@ -13,10 +13,10 @@ use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey};
 use iroh_metrics::encoding::Encoder;
 use iroh_n0des::{
     Registry,
-    simulation::proto::{ActiveTrace, NodeInfo, TraceClient, TraceInfo},
+    simulation::proto::{ActiveTrace, EndpointInfo, TraceClient, TraceInfo},
 };
 use n0_future::IterExt;
-use proto::{GetTraceResponse, NodeInfoWithAddr, Scope};
+use proto::{EndpointInfoWithAddr, GetTraceResponse, Scope};
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
@@ -115,12 +115,12 @@ impl<'a, D: SetupData> SpawnContext<'a, D> {
         self.secret_key.clone()
     }
 
-    /// Returns the node id of this node.
+    /// Returns the endpoint id of this node.
     pub fn id(&self) -> EndpointId {
         self.secret_key.public()
     }
 
-    /// Creates and binds a new endpoint with this node's secret key.
+    /// Creates and binds a new endpoint with this endpoint's secret key.
     ///
     /// # Errors
     ///
@@ -142,7 +142,7 @@ pub struct RoundContext<'a, D = ()> {
     round: u32,
     node_index: u32,
     setup_data: &'a D,
-    all_nodes: &'a Vec<NodeInfoWithAddr>,
+    all_nodes: &'a Vec<EndpointInfoWithAddr>,
 }
 
 impl<'a, D> RoundContext<'a, D> {
@@ -165,7 +165,7 @@ impl<'a, D> RoundContext<'a, D> {
     pub fn all_other_nodes(&self, me: EndpointId) -> impl Iterator<Item = &EndpointAddr> + '_ {
         self.all_nodes
             .iter()
-            .filter(move |n| n.info.id != Some(me))
+            .filter(move |n| n.info.endpoint_id != Some(me))
             .flat_map(|n| &n.addr)
     }
 
@@ -434,9 +434,9 @@ struct SimNode<D> {
     round_fn: BoxedRoundFn<D>,
     check_fn: Option<BoxedCheckFn<D>>,
     round: u32,
-    info: NodeInfo,
+    info: EndpointInfo,
     metrics_encoder: Encoder,
-    all_nodes: Vec<NodeInfoWithAddr>,
+    all_nodes: Vec<EndpointInfoWithAddr>,
 }
 
 impl<D: SetupData> SimNode<D> {
@@ -449,10 +449,10 @@ impl<D: SetupData> SimNode<D> {
     ) -> Result<()> {
         let secret_key = SecretKey::generate(&mut rand::rng());
         let NodeBuilderWithIdx { idx, builder } = builder;
-        let info = NodeInfo {
-            // TODO: Only assign node id if endpoint was created.
-            id: Some(secret_key.public()),
-            idx: idx,
+        let info = EndpointInfo {
+            // TODO: Only assign endpoint id if endpoint was created.
+            idx,
+            endpoint_id: Some(secret_key.public()),
             label: None,
         };
         let mut registry = Registry::default();
@@ -471,7 +471,7 @@ impl<D: SetupData> SimNode<D> {
         let mut node = Self {
             node,
             trace_id,
-            idx: idx,
+            idx,
             info,
             round: 0,
             round_fn: builder.round_fn,
@@ -495,7 +495,7 @@ impl<D: SetupData> SimNode<D> {
 
         info!(idx = self.idx, "start");
 
-        let info = NodeInfoWithAddr {
+        let info = EndpointInfoWithAddr {
             addr: self.my_addr().await,
             info: self.info.clone(),
         };
@@ -552,7 +552,7 @@ impl<D: SetupData> SimNode<D> {
             .put_checkpoint(checkpoint, Some(label), to_str_err(&result))
             .await?;
 
-        // TODO(Frando): Couple metrics to node idx, not node id.
+        // TODO(Frando): Couple metrics to idx, not endpoint id.
         if let Some(id) = self.id() {
             client
                 .put_metrics(id, Some(checkpoint), self.metrics_encoder.export())
@@ -573,7 +573,7 @@ impl<D: SetupData> SimNode<D> {
     }
 
     fn id(&self) -> Option<EndpointId> {
-        self.info.id
+        self.info.endpoint_id
     }
 
     async fn my_addr(&self) -> Option<EndpointAddr> {

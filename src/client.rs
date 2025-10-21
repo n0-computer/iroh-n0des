@@ -68,8 +68,8 @@ impl ClientBuilder {
 
     /// Creates the capability from the provided private ssh key.
     pub fn ssh_key(mut self, key: &ssh_key::PrivateKey) -> Result<Self> {
-        let local_node = self.endpoint.id();
-        let rcan = crate::caps::create_api_token(key, local_node, self.cap_expiry, Caps::all())?;
+        let local_id = self.endpoint.id();
+        let rcan = crate::caps::create_api_token(key, local_id, self.cap_expiry, Caps::all())?;
         self.cap.replace(rcan);
 
         Ok(self)

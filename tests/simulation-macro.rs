@@ -54,8 +54,7 @@ mod tests {
         #[instrument("ping-connect", skip_all, fields(remote = tracing::field::Empty))]
         async fn ping(&self, endpoint: &Endpoint, addr: impl Into<EndpointAddr>) -> Result<()> {
             let addr: EndpointAddr = addr.into();
-            tracing::Span::current()
-                .record("remote", tracing::field::display(addr.id.fmt_short()));
+            tracing::Span::current().record("remote", tracing::field::display(addr.id.fmt_short()));
             debug!("ping connect");
             let connection = endpoint.connect(addr, ALPN).await?;
             debug!("ping connected");

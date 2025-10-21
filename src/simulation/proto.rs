@@ -133,7 +133,7 @@ pub struct GetTraceResponse {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StartNode {
     pub trace_id: Uuid,
-    pub node_info: NodeInfo,
+    pub node_info: EndpointInfo,
     #[serde(with = "time::serde::rfc3339")]
     pub start_time: DateTime,
 }
@@ -162,25 +162,25 @@ pub struct EndNode {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct NodeInfo {
+pub struct EndpointInfo {
     pub idx: EndpointIdx,
-    pub id: Option<EndpointId>,
+    pub endpoint_id: Option<EndpointId>,
     pub label: Option<String>,
 }
 
-impl NodeInfo {
+impl EndpointInfo {
     pub fn new_empty(idx: EndpointIdx) -> Self {
         Self {
             idx,
-            id: None,
+            endpoint_id: None,
             label: None,
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct NodeInfoWithAddr {
-    pub info: NodeInfo,
+pub struct EndpointInfoWithAddr {
+    pub info: EndpointInfo,
     pub addr: Option<EndpointAddr>,
 }
 
@@ -223,12 +223,12 @@ pub struct WaitCheckpoint {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WaitStart {
     pub trace_id: Uuid,
-    pub info: NodeInfoWithAddr,
+    pub info: EndpointInfoWithAddr,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WaitStartResponse {
-    pub infos: Vec<NodeInfoWithAddr>,
+    pub infos: Vec<EndpointInfoWithAddr>,
 }
 
 #[derive(Debug, Clone)]
@@ -302,8 +302,8 @@ impl TraceClient {
     pub async fn init_and_start_trace(&self, name: &str) -> Result<ActiveTrace> {
         let trace_info = TraceInfo::new(name, 1);
         let trace_id = self.init_trace(trace_info, None).await?;
-        let node_info = NodeInfo::new_empty(0);
-        let client = self.start_node(trace_id, node_info).await?;
+        let endpoint_info = EndpointInfo::new_empty(0);
+        let client = self.start_node(trace_id, endpoint_info).await?;
         Ok(client)
     }
 
@@ -370,15 +370,19 @@ impl TraceClient {
         Ok(())
     }
 
-    pub async fn start_node(&self, trace_id: Uuid, node_info: NodeInfo) -> Result<ActiveTrace> {
+    pub async fn start_node(
+        &self,
+        trace_id: Uuid,
+        endpoint_info: EndpointInfo,
+    ) -> Result<ActiveTrace> {
         let start_time = DateTime::now_utc();
-        let idx = node_info.idx;
+        let idx = endpoint_info.idx;
         debug!(%trace_id, idx, "start node");
         let res = self
             .client
             .rpc(StartNode {
                 trace_id,
-                node_info,
+                node_info: endpoint_info,
                 start_time,
             })
             .await??;
@@ -452,7 +456,10 @@ impl ActiveTrace {
         Ok(())
     }
 
-    pub async fn wait_start(&self, info: NodeInfoWithAddr) -> Result<Vec<NodeInfoWithAddr>> {
+    pub async fn wait_start(
+        &self,
+        info: EndpointInfoWithAddr,
+    ) -> Result<Vec<EndpointInfoWithAddr>> {
         debug!("waiting for start...");
         let res = self
             .client
@@ -502,7 +509,7 @@ struct LocalActor {
 
 struct TraceState {
     init: InitTrace,
-    nodes: Vec<NodeInfoWithAddr>,
+    nodes: Vec<EndpointInfoWithAddr>,
     barrier_start: Vec<oneshot::Sender<RemoteResult<WaitStartResponse>>>,
     barrier_checkpoint: BTreeMap<CheckpointId, Vec<oneshot::Sender<RemoteResult<()>>>>,
 }

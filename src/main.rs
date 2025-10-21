@@ -14,10 +14,10 @@ pub async fn main() -> Result<()> {
 
     let client_endpoint = Endpoint::builder().bind().await?;
     let client_id = client_endpoint.id();
-    debug!("local node: {}", client_id,);
+    debug!("local endpoint: {}", client_id,);
 
     let remote_id: EndpointId = std::env::args().nth(1).unwrap().parse()?;
-    let remote_node_addr: EndpointAddr = remote_id.into();
+    let remote_addr: EndpointAddr = remote_id.into();
 
     println!("press ctrl+c once your sshkey is registered");
     tokio::signal::ctrl_c().await?;
@@ -26,7 +26,7 @@ pub async fn main() -> Result<()> {
     let mut rpc_client = Client::builder(&client_endpoint)
         .metrics_interval(Duration::from_secs(2))
         .ssh_key(&alice_ssh_key)?
-        .build(remote_node_addr.clone())
+        .build(remote_addr.clone())
         .await?;
 
     rpc_client.ping().await?;
