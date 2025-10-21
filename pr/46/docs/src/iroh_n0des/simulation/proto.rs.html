@@ -2,7 +2,7 @@
 <a href=#2 id=2 data-nosnippet>2</a>
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>anyhow::Result;
 <a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>bytes::Bytes;
-<a href=#5 id=5 data-nosnippet>5</a><span class="kw">use </span>iroh::{NodeAddr, NodeId};
+<a href=#5 id=5 data-nosnippet>5</a><span class="kw">use </span>iroh::{EndpointAddr, EndpointId};
 <a href=#6 id=6 data-nosnippet>6</a><span class="kw">use </span>iroh_metrics::encoding::Update;
 <a href=#7 id=7 data-nosnippet>7</a><span class="kw">use </span>irpc::{WithChannels, channel::oneshot, rpc_requests, util::make_insecure_client_endpoint};
 <a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span>irpc_iroh::IrohRemoteConnection;
@@ -144,18 +144,18 @@
 <a href=#144 id=144 data-nosnippet>144</a>    // pub setup_data: Option&lt;Bytes&gt;,
 <a href=#145 id=145 data-nosnippet>145</a></span>}
 <a href=#146 id=146 data-nosnippet>146</a>
-<a href=#147 id=147 data-nosnippet>147</a><span class="kw">pub type </span>NodeIdx = u32;
+<a href=#147 id=147 data-nosnippet>147</a><span class="kw">pub type </span>EndpointIdx = u32;
 <a href=#148 id=148 data-nosnippet>148</a>
 <a href=#149 id=149 data-nosnippet>149</a><span class="attr">#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 <a href=#150 id=150 data-nosnippet>150</a></span><span class="kw">pub enum </span>Scope {
 <a href=#151 id=151 data-nosnippet>151</a>    Integrated,
-<a href=#152 id=152 data-nosnippet>152</a>    Isolated(NodeIdx),
+<a href=#152 id=152 data-nosnippet>152</a>    Isolated(EndpointIdx),
 <a href=#153 id=153 data-nosnippet>153</a>}
 <a href=#154 id=154 data-nosnippet>154</a>
 <a href=#155 id=155 data-nosnippet>155</a><span class="attr">#[derive(Debug, Serialize, Deserialize, Clone)]
 <a href=#156 id=156 data-nosnippet>156</a></span><span class="kw">pub struct </span>EndNode {
 <a href=#157 id=157 data-nosnippet>157</a>    <span class="kw">pub </span>trace_id: Uuid,
-<a href=#158 id=158 data-nosnippet>158</a>    <span class="kw">pub </span>node_idx: NodeIdx,
+<a href=#158 id=158 data-nosnippet>158</a>    <span class="kw">pub </span>idx: EndpointIdx,
 <a href=#159 id=159 data-nosnippet>159</a>    <span class="attr">#[serde(with = <span class="string">"time::serde::rfc3339"</span>)]
 <a href=#160 id=160 data-nosnippet>160</a>    </span><span class="kw">pub </span>end_time: DateTime,
 <a href=#161 id=161 data-nosnippet>161</a>    <span class="kw">pub </span>result: <span class="prelude-ty">Result</span>&lt;(), String&gt;,
@@ -163,16 +163,16 @@
 <a href=#163 id=163 data-nosnippet>163</a>
 <a href=#164 id=164 data-nosnippet>164</a><span class="attr">#[derive(Debug, Serialize, Deserialize, Clone)]
 <a href=#165 id=165 data-nosnippet>165</a></span><span class="kw">pub struct </span>NodeInfo {
-<a href=#166 id=166 data-nosnippet>166</a>    <span class="kw">pub </span>idx: NodeIdx,
-<a href=#167 id=167 data-nosnippet>167</a>    <span class="kw">pub </span>node_id: <span class="prelude-ty">Option</span>&lt;NodeId&gt;,
+<a href=#166 id=166 data-nosnippet>166</a>    <span class="kw">pub </span>idx: EndpointIdx,
+<a href=#167 id=167 data-nosnippet>167</a>    <span class="kw">pub </span>id: <span class="prelude-ty">Option</span>&lt;EndpointId&gt;,
 <a href=#168 id=168 data-nosnippet>168</a>    <span class="kw">pub </span>label: <span class="prelude-ty">Option</span>&lt;String&gt;,
 <a href=#169 id=169 data-nosnippet>169</a>}
 <a href=#170 id=170 data-nosnippet>170</a>
 <a href=#171 id=171 data-nosnippet>171</a><span class="kw">impl </span>NodeInfo {
-<a href=#172 id=172 data-nosnippet>172</a>    <span class="kw">pub fn </span>new_empty(idx: NodeIdx) -&gt; <span class="self">Self </span>{
+<a href=#172 id=172 data-nosnippet>172</a>    <span class="kw">pub fn </span>new_empty(idx: EndpointIdx) -&gt; <span class="self">Self </span>{
 <a href=#173 id=173 data-nosnippet>173</a>        <span class="self">Self </span>{
 <a href=#174 id=174 data-nosnippet>174</a>            idx,
-<a href=#175 id=175 data-nosnippet>175</a>            node_id: <span class="prelude-val">None</span>,
+<a href=#175 id=175 data-nosnippet>175</a>            id: <span class="prelude-val">None</span>,
 <a href=#176 id=176 data-nosnippet>176</a>            label: <span class="prelude-val">None</span>,
 <a href=#177 id=177 data-nosnippet>177</a>        }
 <a href=#178 id=178 data-nosnippet>178</a>    }
@@ -181,7 +181,7 @@
 <a href=#181 id=181 data-nosnippet>181</a><span class="attr">#[derive(Debug, Serialize, Deserialize, Clone)]
 <a href=#182 id=182 data-nosnippet>182</a></span><span class="kw">pub struct </span>NodeInfoWithAddr {
 <a href=#183 id=183 data-nosnippet>183</a>    <span class="kw">pub </span>info: NodeInfo,
-<a href=#184 id=184 data-nosnippet>184</a>    <span class="kw">pub </span>addr: <span class="prelude-ty">Option</span>&lt;NodeAddr&gt;,
+<a href=#184 id=184 data-nosnippet>184</a>    <span class="kw">pub </span>addr: <span class="prelude-ty">Option</span>&lt;EndpointAddr&gt;,
 <a href=#185 id=185 data-nosnippet>185</a>}
 <a href=#186 id=186 data-nosnippet>186</a>
 <a href=#187 id=187 data-nosnippet>187</a><span class="attr">#[derive(Debug, Serialize, Deserialize, Clone)]
@@ -194,7 +194,7 @@
 <a href=#194 id=194 data-nosnippet>194</a><span class="attr">#[derive(Debug, Serialize, Deserialize)]
 <a href=#195 id=195 data-nosnippet>195</a></span><span class="kw">pub struct </span>PutMetrics {
 <a href=#196 id=196 data-nosnippet>196</a>    <span class="kw">pub </span>trace_id: Uuid,
-<a href=#197 id=197 data-nosnippet>197</a>    <span class="kw">pub </span>node_id: NodeId,
+<a href=#197 id=197 data-nosnippet>197</a>    <span class="kw">pub </span>id: EndpointId,
 <a href=#198 id=198 data-nosnippet>198</a>    <span class="kw">pub </span>checkpoint_id: <span class="prelude-ty">Option</span>&lt;CheckpointId&gt;,
 <a href=#199 id=199 data-nosnippet>199</a>    <span class="attr">#[serde(with = <span class="string">"time::serde::rfc3339"</span>)]
 <a href=#200 id=200 data-nosnippet>200</a>    </span><span class="kw">pub </span>time: DateTime,
@@ -207,7 +207,7 @@
 <a href=#207 id=207 data-nosnippet>207</a></span><span class="kw">pub struct </span>PutCheckpoint {
 <a href=#208 id=208 data-nosnippet>208</a>    <span class="kw">pub </span>trace_id: Uuid,
 <a href=#209 id=209 data-nosnippet>209</a>    <span class="kw">pub </span>checkpoint_id: CheckpointId,
-<a href=#210 id=210 data-nosnippet>210</a>    <span class="kw">pub </span>node_idx: NodeIdx,
+<a href=#210 id=210 data-nosnippet>210</a>    <span class="kw">pub </span>idx: EndpointIdx,
 <a href=#211 id=211 data-nosnippet>211</a>    <span class="kw">pub </span>label: <span class="prelude-ty">Option</span>&lt;String&gt;,
 <a href=#212 id=212 data-nosnippet>212</a>    <span class="attr">#[serde(with = <span class="string">"time::serde::rfc3339"</span>)]
 <a href=#213 id=213 data-nosnippet>213</a>    </span><span class="kw">pub </span>time: DateTime,
@@ -284,14 +284,14 @@
 <a href=#284 id=284 data-nosnippet>284</a>        <span class="self">Self </span>{ client, session_id }
 <a href=#285 id=285 data-nosnippet>285</a>    }
 <a href=#286 id=286 data-nosnippet>286</a>
-<a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">pub async fn </span>connect_iroh(remote: iroh::NodeId, session_id: Uuid) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+<a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">pub async fn </span>connect_iroh(remote: iroh::EndpointId, session_id: Uuid) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
 <a href=#288 id=288 data-nosnippet>288</a>        <span class="kw">let </span>endpoint = iroh::Endpoint::builder().bind().<span class="kw">await</span><span class="question-mark">?</span>;
 <a href=#289 id=289 data-nosnippet>289</a>        <span class="prelude-val">Ok</span>(<span class="self">Self</span>::connect_iroh_endpoint(endpoint, remote, session_id))
 <a href=#290 id=290 data-nosnippet>290</a>    }
 <a href=#291 id=291 data-nosnippet>291</a>
 <a href=#292 id=292 data-nosnippet>292</a>    <span class="kw">pub fn </span>connect_iroh_endpoint(
 <a href=#293 id=293 data-nosnippet>293</a>        endpoint: iroh::Endpoint,
-<a href=#294 id=294 data-nosnippet>294</a>        remote: <span class="kw">impl </span>Into&lt;iroh::NodeAddr&gt;,
+<a href=#294 id=294 data-nosnippet>294</a>        remote: <span class="kw">impl </span>Into&lt;iroh::EndpointAddr&gt;,
 <a href=#295 id=295 data-nosnippet>295</a>        session_id: Uuid,
 <a href=#296 id=296 data-nosnippet>296</a>    ) -&gt; <span class="self">Self </span>{
 <a href=#297 id=297 data-nosnippet>297</a>        <span class="kw">let </span>conn = IrohRemoteConnection::new(endpoint, remote.into(), ALPN.to_vec());
@@ -372,8 +372,8 @@
 <a href=#372 id=372 data-nosnippet>372</a>
 <a href=#373 id=373 data-nosnippet>373</a>    <span class="kw">pub async fn </span>start_node(<span class="kw-2">&amp;</span><span class="self">self</span>, trace_id: Uuid, node_info: NodeInfo) -&gt; <span class="prelude-ty">Result</span>&lt;ActiveTrace&gt; {
 <a href=#374 id=374 data-nosnippet>374</a>        <span class="kw">let </span>start_time = DateTime::now_utc();
-<a href=#375 id=375 data-nosnippet>375</a>        <span class="kw">let </span>node_idx = node_info.idx;
-<a href=#376 id=376 data-nosnippet>376</a>        <span class="macro">debug!</span>(%trace_id, node_idx, <span class="string">"start node"</span>);
+<a href=#375 id=375 data-nosnippet>375</a>        <span class="kw">let </span>idx = node_info.idx;
+<a href=#376 id=376 data-nosnippet>376</a>        <span class="macro">debug!</span>(%trace_id, idx, <span class="string">"start node"</span>);
 <a href=#377 id=377 data-nosnippet>377</a>        <span class="kw">let </span>res = <span class="self">self
 <a href=#378 id=378 data-nosnippet>378</a>            </span>.client
 <a href=#379 id=379 data-nosnippet>379</a>            .rpc(StartNode {
@@ -383,11 +383,11 @@
 <a href=#383 id=383 data-nosnippet>383</a>            })
 <a href=#384 id=384 data-nosnippet>384</a>            .<span class="kw">await</span><span class="question-mark">??</span>;
 <a href=#385 id=385 data-nosnippet>385</a>        <span class="kw">let </span>StartNodeResponse {} = res;
-<a href=#386 id=386 data-nosnippet>386</a>        <span class="macro">debug!</span>(%trace_id, node_idx, <span class="string">"start node: OK"</span>);
+<a href=#386 id=386 data-nosnippet>386</a>        <span class="macro">debug!</span>(%trace_id, idx, <span class="string">"start node: OK"</span>);
 <a href=#387 id=387 data-nosnippet>387</a>        <span class="prelude-val">Ok</span>(ActiveTrace {
 <a href=#388 id=388 data-nosnippet>388</a>            client: <span class="self">self</span>.client.clone(),
 <a href=#389 id=389 data-nosnippet>389</a>            trace_id,
-<a href=#390 id=390 data-nosnippet>390</a>            node_idx,
+<a href=#390 id=390 data-nosnippet>390</a>            idx,
 <a href=#391 id=391 data-nosnippet>391</a>        })
 <a href=#392 id=392 data-nosnippet>392</a>    }
 <a href=#393 id=393 data-nosnippet>393</a>}
@@ -396,7 +396,7 @@
 <a href=#396 id=396 data-nosnippet>396</a></span><span class="kw">pub struct </span>ActiveTrace {
 <a href=#397 id=397 data-nosnippet>397</a>    client: irpc::Client&lt;TraceProtocol&gt;,
 <a href=#398 id=398 data-nosnippet>398</a>    trace_id: Uuid,
-<a href=#399 id=399 data-nosnippet>399</a>    node_idx: u32,
+<a href=#399 id=399 data-nosnippet>399</a>    idx: u32,
 <a href=#400 id=400 data-nosnippet>400</a>}
 <a href=#401 id=401 data-nosnippet>401</a>
 <a href=#402 id=402 data-nosnippet>402</a><span class="kw">impl </span>ActiveTrace {
@@ -412,7 +412,7 @@
 <a href=#412 id=412 data-nosnippet>412</a>            .rpc(PutCheckpoint {
 <a href=#413 id=413 data-nosnippet>413</a>                trace_id: <span class="self">self</span>.trace_id,
 <a href=#414 id=414 data-nosnippet>414</a>                checkpoint_id: id,
-<a href=#415 id=415 data-nosnippet>415</a>                node_idx: <span class="self">self</span>.node_idx,
+<a href=#415 id=415 data-nosnippet>415</a>                idx: <span class="self">self</span>.idx,
 <a href=#416 id=416 data-nosnippet>416</a>                time,
 <a href=#417 id=417 data-nosnippet>417</a>                label,
 <a href=#418 id=418 data-nosnippet>418</a>                result,
@@ -423,7 +423,7 @@
 <a href=#423 id=423 data-nosnippet>423</a>
 <a href=#424 id=424 data-nosnippet>424</a>    <span class="kw">pub async fn </span>put_metrics(
 <a href=#425 id=425 data-nosnippet>425</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#426 id=426 data-nosnippet>426</a>        node_id: NodeId,
+<a href=#426 id=426 data-nosnippet>426</a>        id: EndpointId,
 <a href=#427 id=427 data-nosnippet>427</a>        checkpoint_id: <span class="prelude-ty">Option</span>&lt;CheckpointId&gt;,
 <a href=#428 id=428 data-nosnippet>428</a>        metrics: Update,
 <a href=#429 id=429 data-nosnippet>429</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
@@ -432,7 +432,7 @@
 <a href=#432 id=432 data-nosnippet>432</a>        <span class="self">self</span>.client
 <a href=#433 id=433 data-nosnippet>433</a>            .rpc(PutMetrics {
 <a href=#434 id=434 data-nosnippet>434</a>                trace_id: <span class="self">self</span>.trace_id,
-<a href=#435 id=435 data-nosnippet>435</a>                node_id,
+<a href=#435 id=435 data-nosnippet>435</a>                id,
 <a href=#436 id=436 data-nosnippet>436</a>                checkpoint_id,
 <a href=#437 id=437 data-nosnippet>437</a>                time,
 <a href=#438 id=438 data-nosnippet>438</a>                metrics,
@@ -444,7 +444,7 @@
 <a href=#444 id=444 data-nosnippet>444</a>    <span class="kw">pub async fn </span>put_logs(<span class="kw-2">&amp;</span><span class="self">self</span>, json_lines: Vec&lt;String&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
 <a href=#445 id=445 data-nosnippet>445</a>        <span class="self">self</span>.client
 <a href=#446 id=446 data-nosnippet>446</a>            .rpc(PutLogs {
-<a href=#447 id=447 data-nosnippet>447</a>                scope: Scope::Isolated(<span class="self">self</span>.node_idx),
+<a href=#447 id=447 data-nosnippet>447</a>                scope: Scope::Isolated(<span class="self">self</span>.idx),
 <a href=#448 id=448 data-nosnippet>448</a>                trace_id: <span class="self">self</span>.trace_id,
 <a href=#449 id=449 data-nosnippet>449</a>                json_lines,
 <a href=#450 id=450 data-nosnippet>450</a>            })
@@ -485,7 +485,7 @@
 <a href=#485 id=485 data-nosnippet>485</a>        <span class="self">self</span>.client
 <a href=#486 id=486 data-nosnippet>486</a>            .rpc(EndNode {
 <a href=#487 id=487 data-nosnippet>487</a>                trace_id: <span class="self">self</span>.trace_id,
-<a href=#488 id=488 data-nosnippet>488</a>                node_idx: <span class="self">self</span>.node_idx,
+<a href=#488 id=488 data-nosnippet>488</a>                idx: <span class="self">self</span>.idx,
 <a href=#489 id=489 data-nosnippet>489</a>                end_time,
 <a href=#490 id=490 data-nosnippet>490</a>                result,
 <a href=#491 id=491 data-nosnippet>491</a>            })
