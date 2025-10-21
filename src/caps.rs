@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, fmt, str::FromStr, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use ed25519_dalek::SigningKey;
-use iroh::NodeId;
+use iroh::EndpointId;
 use rcan::{Capability, Expires, Rcan};
 use serde::{Deserialize, Serialize};
 use ssh_key::PrivateKey as SshPrivateKey;
@@ -239,7 +239,7 @@ impl<C: Capability + Ord> Capability for CapSet<C> {
 /// Create an rcan token for the api access.
 pub fn create_api_token(
     user_ssh_key: &SshPrivateKey,
-    local_node_id: NodeId,
+    local_id: EndpointId,
     max_age: Duration,
     capability: Caps,
 ) -> Result<Rcan<Caps>> {
@@ -251,7 +251,7 @@ pub fn create_api_token(
         .clone()
         .into();
 
-    let audience = local_node_id.public();
+    let audience = local_id.as_verifying_key();
     let can =
         Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
     Ok(can)

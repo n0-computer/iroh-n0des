@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt};
 
-use iroh::NodeId;
+use iroh::EndpointId;
 
 pub struct EventId<'a, T>(Option<&'a T>);
 
@@ -19,7 +19,7 @@ where
 #[derive(Debug, derive_more::From, derive_more::Display)]
 pub enum VisNode<'a> {
     #[display("{}", _0.fmt_short())]
-    Node(NodeId),
+    Node(EndpointId),
     Other(Cow<'a, str>),
 }
 

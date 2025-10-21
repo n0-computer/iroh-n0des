@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, net::SocketAddr};
 
 use anyhow::Result;
 use bytes::Bytes;
-use iroh::{NodeAddr, NodeId};
+use iroh::{EndpointAddr, EndpointId};
 use iroh_metrics::encoding::Update;
 use irpc::{WithChannels, channel::oneshot, rpc_requests, util::make_insecure_client_endpoint};
 use irpc_iroh::IrohRemoteConnection;
@@ -133,7 +133,7 @@ pub struct GetTraceResponse {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StartNode {
     pub trace_id: Uuid,
-    pub node_info: NodeInfo,
+    pub node_info: EndpointInfo,
     #[serde(with = "time::serde::rfc3339")]
     pub start_time: DateTime,
 }
@@ -144,44 +144,44 @@ pub struct StartNodeResponse {
     // pub setup_data: Option<Bytes>,
 }
 
-pub type NodeIdx = u32;
+pub type EndpointIdx = u32;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum Scope {
     Integrated,
-    Isolated(NodeIdx),
+    Isolated(EndpointIdx),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EndNode {
     pub trace_id: Uuid,
-    pub node_idx: NodeIdx,
+    pub idx: EndpointIdx,
     #[serde(with = "time::serde::rfc3339")]
     pub end_time: DateTime,
     pub result: Result<(), String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct NodeInfo {
-    pub idx: NodeIdx,
-    pub node_id: Option<NodeId>,
+pub struct EndpointInfo {
+    pub idx: EndpointIdx,
+    pub endpoint_id: Option<EndpointId>,
     pub label: Option<String>,
 }
 
-impl NodeInfo {
-    pub fn new_empty(idx: NodeIdx) -> Self {
+impl EndpointInfo {
+    pub fn new_empty(idx: EndpointIdx) -> Self {
         Self {
             idx,
-            node_id: None,
+            endpoint_id: None,
             label: None,
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct NodeInfoWithAddr {
-    pub info: NodeInfo,
-    pub addr: Option<NodeAddr>,
+pub struct EndpointInfoWithAddr {
+    pub info: EndpointInfo,
+    pub addr: Option<EndpointAddr>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -194,7 +194,7 @@ pub struct PutLogs {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PutMetrics {
     pub trace_id: Uuid,
-    pub node_id: NodeId,
+    pub id: EndpointId,
     pub checkpoint_id: Option<CheckpointId>,
     #[serde(with = "time::serde::rfc3339")]
     pub time: DateTime,
@@ -207,7 +207,7 @@ pub type CheckpointId = u64;
 pub struct PutCheckpoint {
     pub trace_id: Uuid,
     pub checkpoint_id: CheckpointId,
-    pub node_idx: NodeIdx,
+    pub idx: EndpointIdx,
     pub label: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub time: DateTime,
@@ -223,12 +223,12 @@ pub struct WaitCheckpoint {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WaitStart {
     pub trace_id: Uuid,
-    pub info: NodeInfoWithAddr,
+    pub info: EndpointInfoWithAddr,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WaitStartResponse {
-    pub infos: Vec<NodeInfoWithAddr>,
+    pub infos: Vec<EndpointInfoWithAddr>,
 }
 
 #[derive(Debug, Clone)]
@@ -284,14 +284,14 @@ impl TraceClient {
         Self { client, session_id }
     }
 
-    pub async fn connect_iroh(remote: iroh::NodeId, session_id: Uuid) -> Result<Self> {
+    pub async fn connect_iroh(remote: iroh::EndpointId, session_id: Uuid) -> Result<Self> {
         let endpoint = iroh::Endpoint::builder().bind().await?;
         Ok(Self::connect_iroh_endpoint(endpoint, remote, session_id))
     }
 
     pub fn connect_iroh_endpoint(
         endpoint: iroh::Endpoint,
-        remote: impl Into<iroh::NodeAddr>,
+        remote: impl Into<iroh::EndpointAddr>,
         session_id: Uuid,
     ) -> Self {
         let conn = IrohRemoteConnection::new(endpoint, remote.into(), ALPN.to_vec());
@@ -302,8 +302,8 @@ impl TraceClient {
     pub async fn init_and_start_trace(&self, name: &str) -> Result<ActiveTrace> {
         let trace_info = TraceInfo::new(name, 1);
         let trace_id = self.init_trace(trace_info, None).await?;
-        let node_info = NodeInfo::new_empty(0);
-        let client = self.start_node(trace_id, node_info).await?;
+        let endpoint_info = EndpointInfo::new_empty(0);
+        let client = self.start_node(trace_id, endpoint_info).await?;
         Ok(client)
     }
 
@@ -370,24 +370,28 @@ impl TraceClient {
         Ok(())
     }
 
-    pub async fn start_node(&self, trace_id: Uuid, node_info: NodeInfo) -> Result<ActiveTrace> {
+    pub async fn start_node(
+        &self,
+        trace_id: Uuid,
+        endpoint_info: EndpointInfo,
+    ) -> Result<ActiveTrace> {
         let start_time = DateTime::now_utc();
-        let node_idx = node_info.idx;
-        debug!(%trace_id, node_idx, "start node");
+        let idx = endpoint_info.idx;
+        debug!(%trace_id, idx, "start node");
         let res = self
             .client
             .rpc(StartNode {
                 trace_id,
-                node_info,
+                node_info: endpoint_info,
                 start_time,
             })
             .await??;
         let StartNodeResponse {} = res;
-        debug!(%trace_id, node_idx, "start node: OK");
+        debug!(%trace_id, idx, "start node: OK");
         Ok(ActiveTrace {
             client: self.client.clone(),
             trace_id,
-            node_idx,
+            idx,
         })
     }
 }
@@ -396,7 +400,7 @@ impl TraceClient {
 pub struct ActiveTrace {
     client: irpc::Client<TraceProtocol>,
     trace_id: Uuid,
-    node_idx: u32,
+    idx: u32,
 }
 
 impl ActiveTrace {
@@ -412,7 +416,7 @@ impl ActiveTrace {
             .rpc(PutCheckpoint {
                 trace_id: self.trace_id,
                 checkpoint_id: id,
-                node_idx: self.node_idx,
+                idx: self.idx,
                 time,
                 label,
                 result,
@@ -423,7 +427,7 @@ impl ActiveTrace {
 
     pub async fn put_metrics(
         &self,
-        node_id: NodeId,
+        id: EndpointId,
         checkpoint_id: Option<CheckpointId>,
         metrics: Update,
     ) -> Result<()> {
@@ -432,7 +436,7 @@ impl ActiveTrace {
         self.client
             .rpc(PutMetrics {
                 trace_id: self.trace_id,
-                node_id,
+                id,
                 checkpoint_id,
                 time,
                 metrics,
@@ -444,7 +448,7 @@ impl ActiveTrace {
     pub async fn put_logs(&self, json_lines: Vec<String>) -> Result<()> {
         self.client
             .rpc(PutLogs {
-                scope: Scope::Isolated(self.node_idx),
+                scope: Scope::Isolated(self.idx),
                 trace_id: self.trace_id,
                 json_lines,
             })
@@ -452,7 +456,10 @@ impl ActiveTrace {
         Ok(())
     }
 
-    pub async fn wait_start(&self, info: NodeInfoWithAddr) -> Result<Vec<NodeInfoWithAddr>> {
+    pub async fn wait_start(
+        &self,
+        info: EndpointInfoWithAddr,
+    ) -> Result<Vec<EndpointInfoWithAddr>> {
         debug!("waiting for start...");
         let res = self
             .client
@@ -485,7 +492,7 @@ impl ActiveTrace {
         self.client
             .rpc(EndNode {
                 trace_id: self.trace_id,
-                node_idx: self.node_idx,
+                idx: self.idx,
                 end_time,
                 result,
             })
@@ -502,7 +509,7 @@ struct LocalActor {
 
 struct TraceState {
     init: InitTrace,
-    nodes: Vec<NodeInfoWithAddr>,
+    nodes: Vec<EndpointInfoWithAddr>,
     barrier_start: Vec<oneshot::Sender<RemoteResult<WaitStartResponse>>>,
     barrier_checkpoint: BTreeMap<CheckpointId, Vec<oneshot::Sender<RemoteResult<()>>>>,
 }

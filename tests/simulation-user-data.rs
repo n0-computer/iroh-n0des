@@ -62,7 +62,7 @@ mod tests {
         async fn round(_node: &mut MyNode, context: &RoundContext<'_, SetupData>) -> Result<bool> {
             // we can access the shared data!
             let _shared_secret = context.setup_data().shared_secret;
-            let _me = context.try_self_addr()?.node_id;
+            let _me = context.try_self_addr()?.id;
             // do whatever.
             Ok(true)
         }
