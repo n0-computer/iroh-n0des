@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{Result, anyhow, ensure};
-use iroh::{Endpoint, NodeAddr, NodeId};
+use iroh::{Endpoint, EndpointAddr, EndpointId};
 use iroh_metrics::{Registry, encoding::Encoder};
 use irpc_iroh::IrohRemoteConnection;
 use n0_future::task::AbortOnDropHandle;
@@ -68,7 +68,7 @@ impl ClientBuilder {
 
     /// Creates the capability from the provided private ssh key.
     pub fn ssh_key(mut self, key: &ssh_key::PrivateKey) -> Result<Self> {
-        let local_node = self.endpoint.node_id();
+        let local_node = self.endpoint.id();
         let rcan = crate::caps::create_api_token(key, local_node, self.cap_expiry, Caps::all())?;
         self.cap.replace(rcan);
 
@@ -78,7 +78,7 @@ impl ClientBuilder {
     /// Sets the rcan directly.
     pub fn rcan(mut self, cap: Rcan<Caps>) -> Result<Self> {
         ensure!(
-            NodeId::from(*cap.audience()) == self.endpoint.node_id(),
+            EndpointId::from_verifying_key(*cap.audience()) == self.endpoint.id(),
             "invalid audience"
         );
         self.cap.replace(cap);
@@ -86,7 +86,7 @@ impl ClientBuilder {
     }
 
     /// Create a new client, connected to the provide service node
-    pub async fn build(self, remote: impl Into<NodeAddr>) -> Result<Client, BuildError> {
+    pub async fn build(self, remote: impl Into<EndpointAddr>) -> Result<Client, BuildError> {
         let cap = self.cap.ok_or(BuildError::MissingCapability)?;
         let conn = IrohRemoteConnection::new(self.endpoint.clone(), remote.into(), ALPN.to_vec());
         let client = N0desClient::boxed(conn);

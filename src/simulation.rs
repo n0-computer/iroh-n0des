@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use iroh::{Endpoint, NodeAddr, NodeId, SecretKey};
+use iroh::{Endpoint, EndpointAddr, EndpointId, SecretKey};
 use iroh_metrics::encoding::Encoder;
 use iroh_n0des::{
     Registry,
@@ -87,7 +87,7 @@ impl<T> SetupData for T where T: Serialize + DeserializeOwned + Send + Sync + Cl
 /// a node, including its index, the shared setup data, and a metrics registry.
 pub struct SpawnContext<'a, D = ()> {
     secret_key: SecretKey,
-    node_idx: u32,
+    idx: u32,
     setup_data: &'a D,
     registry: &'a mut Registry,
 }
@@ -95,7 +95,7 @@ pub struct SpawnContext<'a, D = ()> {
 impl<'a, D: SetupData> SpawnContext<'a, D> {
     /// Returns the index of this node in the simulation.
     pub fn node_index(&self) -> u32 {
-        self.node_idx
+        self.idx
     }
 
     /// Returns a reference to the setup data for this simulation.
@@ -116,7 +116,7 @@ impl<'a, D: SetupData> SpawnContext<'a, D> {
     }
 
     /// Returns the node id of this node.
-    pub fn node_id(&self) -> NodeId {
+    pub fn id(&self) -> EndpointId {
         self.secret_key.public()
     }
 
@@ -127,7 +127,6 @@ impl<'a, D: SetupData> SpawnContext<'a, D> {
     /// Returns an error if the endpoint fails to bind to a local address.
     pub async fn bind_endpoint(&self) -> Result<Endpoint> {
         let ep = Endpoint::builder()
-            .discovery_n0()
             .secret_key(self.secret_key())
             .bind()
             .await?;
@@ -163,10 +162,10 @@ impl<'a, D> RoundContext<'a, D> {
     }
 
     /// Returns an iterator over the addresses of all nodes except the specified one.
-    pub fn all_other_nodes(&self, me: NodeId) -> impl Iterator<Item = &NodeAddr> + '_ {
+    pub fn all_other_nodes(&self, me: EndpointId) -> impl Iterator<Item = &EndpointAddr> + '_ {
         self.all_nodes
             .iter()
-            .filter(move |n| n.info.node_id != Some(me))
+            .filter(move |n| n.info.id != Some(me))
             .flat_map(|n| &n.addr)
     }
 
@@ -175,7 +174,7 @@ impl<'a, D> RoundContext<'a, D> {
     /// # Errors
     ///
     /// Returns an error if no node with the specified index exists.
-    pub fn addr(&self, idx: u32) -> Result<NodeAddr> {
+    pub fn addr(&self, idx: u32) -> Result<EndpointAddr> {
         self.all_nodes
             .iter()
             .find(|n| n.info.idx == idx)
@@ -186,14 +185,14 @@ impl<'a, D> RoundContext<'a, D> {
     }
 
     /// Returns the address of this node.
-    pub fn self_addr(&self) -> Option<&NodeAddr> {
+    pub fn self_addr(&self) -> Option<&EndpointAddr> {
         self.all_nodes
             .iter()
             .find(|n| n.info.idx == self.node_index)
             .and_then(|info| info.addr.as_ref())
     }
 
-    pub fn try_self_addr(&self) -> Result<&NodeAddr> {
+    pub fn try_self_addr(&self) -> Result<&EndpointAddr> {
         self.self_addr().context("missing node address")
     }
 
@@ -449,17 +448,17 @@ impl<D: SetupData> SimNode<D> {
         rounds: u32,
     ) -> Result<()> {
         let secret_key = SecretKey::generate(&mut rand::rng());
-        let NodeBuilderWithIdx { node_idx, builder } = builder;
+        let NodeBuilderWithIdx { idx, builder } = builder;
         let info = NodeInfo {
             // TODO: Only assign node id if endpoint was created.
-            node_id: Some(secret_key.public()),
-            idx: node_idx,
+            id: Some(secret_key.public()),
+            idx: idx,
             label: None,
         };
         let mut registry = Registry::default();
         let mut context = SpawnContext {
             setup_data,
-            node_idx,
+            idx,
             secret_key,
             registry: &mut registry,
         };
@@ -472,7 +471,7 @@ impl<D: SetupData> SimNode<D> {
         let mut node = Self {
             node,
             trace_id,
-            idx: node_idx,
+            idx: idx,
             info,
             round: 0,
             round_fn: builder.round_fn,
@@ -554,9 +553,9 @@ impl<D: SetupData> SimNode<D> {
             .await?;
 
         // TODO(Frando): Couple metrics to node idx, not node id.
-        if let Some(node_id) = self.node_id() {
+        if let Some(id) = self.id() {
             client
-                .put_metrics(node_id, Some(checkpoint), self.metrics_encoder.export())
+                .put_metrics(id, Some(checkpoint), self.metrics_encoder.export())
                 .await?;
         }
 
@@ -573,22 +572,22 @@ impl<D: SetupData> SimNode<D> {
         }
     }
 
-    fn node_id(&self) -> Option<NodeId> {
-        self.info.node_id
+    fn id(&self) -> Option<EndpointId> {
+        self.info.id
     }
 
-    async fn my_addr(&self) -> Option<NodeAddr> {
+    async fn my_addr(&self) -> Option<EndpointAddr> {
         if let Some(endpoint) = self.node.endpoint() {
-            Some(node_addr(endpoint).await)
+            Some(addr(endpoint).await)
         } else {
             None
         }
     }
 }
 
-async fn node_addr(endpoint: &Endpoint) -> NodeAddr {
+async fn addr(endpoint: &Endpoint) -> EndpointAddr {
     endpoint.online().await;
-    endpoint.node_addr()
+    endpoint.addr()
 }
 
 impl Default for Builder<()> {
@@ -712,8 +711,8 @@ impl<D: SetupData> Builder<D> {
             .into_iter()
             .flat_map(|builder| (0..builder.count).map(move |_| builder.builder.clone()))
             .enumerate()
-            .map(|(node_idx, builder)| NodeBuilderWithIdx {
-                node_idx: node_idx as u32,
+            .map(|(idx, builder)| NodeBuilderWithIdx {
+                idx: idx as u32,
                 builder,
             });
 
@@ -744,7 +743,7 @@ struct NodeBuilderWithCount<D> {
 }
 
 struct NodeBuilderWithIdx<D> {
-    node_idx: u32,
+    idx: u32,
     builder: ErasedNodeBuilder<D>,
 }
 
@@ -796,7 +795,7 @@ impl<D: SetupData> Simulation<D> {
             .node_builders
             .into_iter()
             .map(async |builder| {
-                let span = error_span!("sim-node", idx = builder.node_idx);
+                let span = error_span!("sim-node", idx = builder.idx);
                 SimNode::spawn_and_run(
                     builder,
                     self.client.clone(),

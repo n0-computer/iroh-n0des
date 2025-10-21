@@ -3,7 +3,7 @@ mod tests {
 
     use anyhow::{Result, ensure};
     use iroh::{
-        Endpoint, NodeAddr,
+        Endpoint, EndpointAddr,
         endpoint::Connection,
         protocol::{ProtocolHandler, Router},
     };
@@ -52,10 +52,10 @@ mod tests {
         }
 
         #[instrument("ping-connect", skip_all, fields(remote = tracing::field::Empty))]
-        async fn ping(&self, endpoint: &Endpoint, addr: impl Into<NodeAddr>) -> Result<()> {
-            let addr: NodeAddr = addr.into();
+        async fn ping(&self, endpoint: &Endpoint, addr: impl Into<EndpointAddr>) -> Result<()> {
+            let addr: EndpointAddr = addr.into();
             tracing::Span::current()
-                .record("remote", tracing::field::display(addr.node_id.fmt_short()));
+                .record("remote", tracing::field::display(addr.id.fmt_short()));
             debug!("ping connect");
             let connection = endpoint.connect(addr, ALPN).await?;
             debug!("ping connected");
@@ -103,7 +103,7 @@ mod tests {
     }
 
     impl PingNode {
-        async fn ping(&self, addr: impl Into<NodeAddr>) -> Result<()> {
+        async fn ping(&self, addr: impl Into<EndpointAddr>) -> Result<()> {
             self.ping.ping(self.router.endpoint(), addr).await
         }
     }
@@ -112,7 +112,7 @@ mod tests {
     async fn test_simulation_ping() -> Result<Builder<()>> {
         const EVENT_ID: &str = "ping";
         async fn tick(node: &mut PingNode, ctx: &RoundContext<'_>) -> Result<bool> {
-            let me = ctx.try_self_addr()?.node_id;
+            let me = ctx.try_self_addr()?.id;
 
             let target = ctx.all_other_nodes(me).choose(&mut rand::rng()).unwrap();
             node.ping(target.clone()).await?;
@@ -120,7 +120,7 @@ mod tests {
             // record event for simulation visualization.
             iroh_n0des::simulation::events::event_start(
                 me.fmt_short().to_string(),
-                target.node_id.fmt_short().to_string(),
+                target.id.fmt_short().to_string(),
                 format!("send ping (round {})", ctx.round()),
                 Some(EVENT_ID.to_string()),
             );
@@ -170,7 +170,7 @@ mod tests {
     #[iroh_n0des::sim]
     async fn test_conn() -> Result<Builder> {
         async fn tick(node: &mut PingNode, ctx: &RoundContext<'_>) -> Result<bool> {
-            let me = node.router.endpoint().node_id();
+            let me = node.router.endpoint().id();
             if ctx.node_index() == 1 {
                 for other in ctx.all_other_nodes(me) {
                     node.ping
