@@ -53,3 +53,7 @@ members = ["iroh-n0des-macro"]
 [[bin]]
 name = "iroh-n0des"
 path = "src/main.rs"
+
+[patch.crates-io]
+iroh = { git = "https://github.com/n0-computer/iroh.git", branch = "main" }
+irpc = { git = "https://github.com/n0-computer/irpc.git", branch = "patch-iroh-main" }
