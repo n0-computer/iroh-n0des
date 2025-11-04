@@ -14,11 +14,11 @@ rust-version = "1.85"
 anyhow = "1.0.95"
 derive_more = { version = "2.0.1", features = ["display", "from"] }
 ed25519-dalek = "3.0.0-pre.1"
-irpc = "0.10.0"
-irpc-iroh = { version = "0.10.0" }
-iroh = { version = "0.94" }
+irpc = { git = "https://github.com/n0-computer/irpc", branch = "arqu/histograms2" }
+irpc-iroh = { git = "https://github.com/n0-computer/irpc", branch = "arqu/histograms2"}
+iroh = { git = "https://github.com/n0-computer/iroh", branch = "arqu/histograms2"}
 iroh-n0des-macro = { version = "0.2.0", path = "iroh-n0des-macro" }
-iroh-metrics = "0.36"
+iroh-metrics = { git = "https://github.com/n0-computer/iroh-metrics", branch = "arqu/histograms2", default-features = false }
 n0-future = "0.3.0"
 quinn = { package = "iroh-quinn", version = "0.14.0", default-features = false }
 rand = "0.9"
