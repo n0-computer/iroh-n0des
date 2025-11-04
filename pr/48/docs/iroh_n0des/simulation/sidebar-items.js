@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ENV_TRACE_INIT_ONLY","ENV_TRACE_ISOLATED","ENV_TRACE_SERVER","ENV_TRACE_SESSION_ID"],"mod":["events","proto","trace"],"struct":["Builder","NodeBuilder","RoundContext","Simulation","SpawnContext"],"trait":["AsyncCallback","DynNode","Node","SetupData","Spawn"],"type":["BoxNode"]};
