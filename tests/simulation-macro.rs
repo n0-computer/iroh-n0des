@@ -32,7 +32,7 @@ mod tests {
         async fn accept(&self, connection: Connection) -> Result<(), iroh::protocol::AcceptError> {
             self.accept(connection)
                 .await
-                .map_err(|err| err.into_boxed_dyn_error().into())
+                .map_err(|err| iroh::protocol::AcceptError::from_err(n0_error::anyerr!(err)))
         }
     }
 

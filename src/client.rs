@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{Result, anyhow, ensure};
-use iroh::{Endpoint, EndpointAddr, EndpointId};
+use iroh::{Endpoint, EndpointAddr, EndpointId, endpoint::ConnectError};
 use iroh_metrics::{Registry, encoding::Encoder};
 use irpc_iroh::IrohRemoteConnection;
 use n0_future::task::AbortOnDropHandle;
@@ -88,7 +88,12 @@ impl ClientBuilder {
     /// Create a new client, connected to the provide service node
     pub async fn build(self, remote: impl Into<EndpointAddr>) -> Result<Client, BuildError> {
         let cap = self.cap.ok_or(BuildError::MissingCapability)?;
-        let conn = IrohRemoteConnection::new(self.endpoint.clone(), remote.into(), ALPN.to_vec());
+        let conn = self
+            .endpoint
+            .connect(remote.into(), ALPN)
+            .await
+            .map_err(BuildError::Connect)?;
+        let conn = IrohRemoteConnection::new(conn);
         let client = N0desClient::boxed(conn);
 
         // If auth fails, the connection is aborted.
@@ -120,16 +125,23 @@ pub enum BuildError {
     Unauthorized,
     #[error("Remote error: {0}")]
     Remote(#[from] RemoteError),
-    #[error("Connection error: {0}")]
+    #[error("Rpc connection error: {0}")]
     Rpc(irpc::Error),
+    #[error("Connection error: {0}")]
+    Connect(ConnectError),
 }
 
 impl From<irpc::Error> for BuildError {
     fn from(value: irpc::Error) -> Self {
         match value {
-            irpc::Error::Request(irpc::RequestError::Connection(
-                iroh::endpoint::ConnectionError::ApplicationClosed(frame),
-            )) if frame.error_code == 401u32.into() => Self::Unauthorized,
+            irpc::Error::Request {
+                source:
+                    irpc::RequestError::Connection {
+                        source: iroh::endpoint::ConnectionError::ApplicationClosed(frame),
+                        ..
+                    },
+                ..
+            } if frame.error_code == 401u32.into() => Self::Unauthorized,
             value => Self::Rpc(value),
         }
     }
