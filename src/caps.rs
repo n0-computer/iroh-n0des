@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, fmt, str::FromStr, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use ed25519_dalek::SigningKey;
-use iroh::EndpointId;
+use iroh::{EndpointId, SecretKey};
 use rcan::{Capability, Expires, Rcan};
 use serde::{Deserialize, Serialize};
 use ssh_key::PrivateKey as SshPrivateKey;
@@ -66,6 +66,8 @@ impl std::ops::Deref for Caps {
 pub enum Cap {
     #[strum(to_string = "all")]
     All,
+    #[strum(to_string = "client")]
+    Client,
     #[strum(to_string = "relay:{0}")]
     Relay(RelayCap),
     #[strum(to_string = "metrics:{0}")]
@@ -107,6 +109,15 @@ impl Caps {
         Self::V0(CapSet::new(caps))
     }
 
+    /// the class of capabilities that n0des will accept when deriving from a
+    /// shared secret like a [`N0desTicket`]. These should be "client" capabilities:
+    /// typically for users of an app
+    pub fn for_shared_secret() -> Self {
+        Self::new([Cap::Client])
+    }
+
+    /// The maximum set of capabilities. n0des will only accept these capabilities
+    /// when deriving from a secret that is registered with n0des, like an SSH key
     pub fn all() -> Self {
         Self::new([Cap::All])
     }
@@ -145,10 +156,20 @@ impl Capability for Cap {
     fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (Cap::All, _) => true,
+            (Cap::Client, other) => client_capabilities(other),
             (Cap::Relay(slf), Cap::Relay(other)) => slf.permits(other),
             (Cap::Metrics(slf), Cap::Metrics(other)) => slf.permits(other),
             (_, _) => false,
         }
+    }
+}
+
+fn client_capabilities(other: &Cap) -> bool {
+    match other {
+        Cap::All => false,
+        Cap::Client => true,
+        Cap::Relay(RelayCap::Use) => true,
+        Cap::Metrics(MetricsCap::PutAny) => true,
     }
 }
 
@@ -257,6 +278,20 @@ pub fn create_api_token(
     Ok(can)
 }
 
+/// Create an rcan token for the api access from an iroh secret key
+pub fn create_api_token_from_secret_key(
+    private_key: SecretKey,
+    local_id: EndpointId,
+    max_age: Duration,
+    capability: Caps,
+) -> Result<Rcan<Caps>> {
+    let issuer = SigningKey::from_bytes(&private_key.to_bytes());
+    let audience = local_id.as_verifying_key();
+    let can =
+        Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
+    Ok(can)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,5 +335,17 @@ mod tests {
 
         assert!(!metrics.permits(&relay));
         assert!(!relay.permits(&metrics));
+    }
+
+    #[test]
+    fn client_caps() {
+        let client = Caps::new([Cap::Client]);
+
+        let all = Caps::new([Cap::All]);
+        let metrics = Caps::new([MetricsCap::PutAny]);
+        let relay = Caps::new([RelayCap::Use]);
+        assert!(client.permits(&metrics));
+        assert!(client.permits(&relay));
+        assert!(!client.permits(&all));
     }
 }
