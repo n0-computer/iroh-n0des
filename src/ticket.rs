@@ -47,7 +47,7 @@ struct Variant0N0desTicket {
 
 impl Ticket for N0desTicket {
     // KIND is the constant that's added to the front of a serialized ticket
-    // string. It should be a short, human readble string
+    // string. It should be a short, human readable string
     const KIND: &'static str = "n0des";
 
     fn to_bytes(&self) -> Vec<u8> {

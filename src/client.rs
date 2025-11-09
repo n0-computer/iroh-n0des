@@ -70,22 +70,13 @@ impl ClientBuilder {
         self
     }
 
-    /// Check N0DES_SECRET environment variable to supply credentials
-    pub fn secret_from_env(mut self) -> Result<Self> {
+    /// Check N0DES_SECRET environment variable to supply a N0desTicket
+    pub fn secret_from_env(self) -> Result<Self> {
         match std::env::var("N0DES_SECRET") {
             Ok(ticket_string) => {
                 let ticket =
                     N0desTicket::from_str(&ticket_string).context("invalid N0DES_SECRET")?;
-                let local_id = self.endpoint.id();
-                let rcan = crate::caps::create_api_token_from_secret_key(
-                    ticket.secret,
-                    local_id,
-                    self.cap_expiry,
-                    Caps::for_shared_secret(),
-                )?;
-
-                self.remote = Some(ticket.remote);
-                self.rcan(rcan)
+                self.ticket(ticket)
             }
             Err(VarError::NotPresent) => {
                 Err(anyhow!("N0DES_SECRET environment variable is not set"))
@@ -95,6 +86,22 @@ impl ClientBuilder {
                 e
             )),
         }
+    }
+
+    /// Use a shared secret & remote n0des endpoint ID contained within a ticket
+    /// to construct a n0des client. The resulting client will have "Client"
+    /// capabilities.
+    pub fn ticket(mut self, ticket: N0desTicket) -> Result<Self> {
+        let local_id = self.endpoint.id();
+        let rcan = crate::caps::create_api_token_from_secret_key(
+            ticket.secret,
+            local_id,
+            self.cap_expiry,
+            Caps::for_shared_secret(),
+        )?;
+
+        self.remote = Some(ticket.remote);
+        self.rcan(rcan)
     }
 
     /// Loads the private ssh key from the given path, and creates the needed capability.
