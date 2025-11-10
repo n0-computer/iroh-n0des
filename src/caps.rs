@@ -1,11 +1,8 @@
-use std::{collections::BTreeSet, fmt, str::FromStr, time::Duration};
+use std::{collections::BTreeSet, fmt, str::FromStr};
 
 use anyhow::{Context, Result, bail};
-use ed25519_dalek::SigningKey;
-use iroh::EndpointId;
-use rcan::{Capability, Expires, Rcan};
+use rcan::Capability;
 use serde::{Deserialize, Serialize};
-use ssh_key::PrivateKey as SshPrivateKey;
 
 macro_rules! cap_enum(
     ($enum:item) => {
@@ -237,13 +234,14 @@ impl<C: Capability + Ord> Capability for CapSet<C> {
 }
 
 /// Create an rcan token for the api access.
-pub fn create_api_token(
-    user_ssh_key: &SshPrivateKey,
-    local_id: EndpointId,
-    max_age: Duration,
+#[cfg(feature = "ssh-key")]
+pub fn create_api_token_from_ssh_key(
+    user_ssh_key: &ssh_key::PrivateKey,
+    local_id: iroh::EndpointId,
+    max_age: std::time::Duration,
     capability: Caps,
 ) -> Result<Rcan<Caps>> {
-    let issuer: SigningKey = user_ssh_key
+    let issuer: ed25519_dalek::SigningKey = user_ssh_key
         .key_data()
         .ed25519()
         .context("only Ed25519 keys supported")?
@@ -252,8 +250,8 @@ pub fn create_api_token(
         .into();
 
     let audience = local_id.as_verifying_key();
-    let can =
-        Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
+    let can = rcan::Rcan::issuing_builder(&issuer, audience, capability)
+        .sign(rcan::Expires::valid_for(max_age));
     Ok(can)
 }
 

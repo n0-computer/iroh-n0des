@@ -1,5 +1,4 @@
 use std::{
-    path::Path,
     sync::{Arc, RwLock},
     time::Duration,
 };
@@ -26,6 +25,7 @@ pub struct Client {
 
 /// Constructs an IPS client
 pub struct ClientBuilder {
+    #[allow(dead_code)]
     cap_expiry: Duration,
     cap: Option<Rcan<Caps>>,
     endpoint: Endpoint,
@@ -59,7 +59,8 @@ impl ClientBuilder {
     }
 
     /// Loads the private ssh key from the given path, and creates the needed capability.
-    pub async fn ssh_key_from_file<P: AsRef<Path>>(self, path: P) -> Result<Self> {
+    #[cfg(feature = "ssh-key")]
+    pub async fn ssh_key_from_file<P: AsRef<std::path::Path>>(self, path: P) -> Result<Self> {
         let file_content = tokio::fs::read_to_string(path).await?;
         let private_key = ssh_key::PrivateKey::from_openssh(&file_content)?;
 
@@ -67,9 +68,15 @@ impl ClientBuilder {
     }
 
     /// Creates the capability from the provided private ssh key.
+    #[cfg(feature = "ssh-key")]
     pub fn ssh_key(mut self, key: &ssh_key::PrivateKey) -> Result<Self> {
         let local_id = self.endpoint.id();
-        let rcan = crate::caps::create_api_token(key, local_id, self.cap_expiry, Caps::all())?;
+        let rcan = crate::caps::create_api_token_from_ssh_key(
+            key,
+            local_id,
+            self.cap_expiry,
+            Caps::all(),
+        )?;
         self.cap.replace(rcan);
 
         Ok(self)
@@ -164,9 +171,14 @@ impl Client {
 
     /// Pings the remote node.
     pub async fn ping(&mut self) -> Result<(), Error> {
-        let req = rand::random();
-        let pong = self.client.rpc(Ping { req }).await?;
-        if pong.req == req {
+        let req = Uuid::new_v4();
+        let pong = self
+            .client
+            .rpc(Ping {
+                req: *req.as_bytes(),
+            })
+            .await?;
+        if pong.req == *req.as_bytes() {
             Ok(())
         } else {
             Err(Error::Other(anyhow!("unexpected pong response")))
