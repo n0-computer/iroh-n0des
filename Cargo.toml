@@ -57,8 +57,9 @@ tokio = { version = "1.45", features = ["macros", "rt", "rt-multi-thread"] }
 members = ["iroh-n0des-macro"]
 
 [features]
-default = ["client", "ssh-key"]
+default = ["client", "ssh-key", "signals"]
 client = []
+signals = []
 ssh-key = [
     "dep:ssh-key"
 ]
