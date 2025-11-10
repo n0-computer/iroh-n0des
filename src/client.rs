@@ -18,7 +18,10 @@ use uuid::Uuid;
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
-    protocol::{ALPN, Auth, N0desClient, Ping, Pong, PutMetrics, RemoteError},
+    protocol::{
+        ALPN, Auth, CreateSignal, GetSignals, N0desClient, Ping, Pong, PutMetrics, RemoteError,
+        Signal,
+    },
 };
 
 /// Client is the main handle for interacting with n0des. It communicates with
@@ -287,6 +290,35 @@ impl Client {
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
             .map_err(Error::Remote)
     }
+
+    #[cfg(feature = "signals")]
+    pub async fn create_signal(&self, ttl: u32, name: String, value: Vec<u8>) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::CreateSignal {
+                ttl,
+                name,
+                value,
+                done: tx,
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow!("sending metrics")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+    }
+
+    #[cfg(feature = "signals")]
+    pub async fn list_signals(&self) -> Result<Vec<Signal>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::FetchSignals { done: tx })
+            .await
+            .map_err(|_| Error::Other(anyhow!("sending metrics")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+    }
 }
 
 enum ClientActorMessage {
@@ -295,6 +327,17 @@ enum ClientActorMessage {
     },
     Ping {
         done: oneshot::Sender<Result<Pong, RemoteError>>,
+    },
+    #[cfg(feature = "signals")]
+    CreateSignal {
+        ttl: u32,
+        name: String,
+        value: Vec<u8>,
+        done: oneshot::Sender<Result<(), Error>>,
+    },
+    #[cfg(feature = "signals")]
+    FetchSignals {
+        done: oneshot::Sender<Result<Vec<Signal>, Error>>,
     },
 }
 
@@ -335,6 +378,20 @@ impl ClientActor {
                             if let Err(err) = done.send(res) {
                                 debug!("failed to push metrics: {:#?}", err);
                                 self.authorized = false;
+                            }
+                        }
+                        #[cfg(feature = "signals")]
+                        ClientActorMessage::CreateSignal{ ttl, name, value, done } => {
+                            let res = self.signals_send(ttl, name, value).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to create signal: {:#?}", err);
+                            }
+                        }
+                        #[cfg(feature = "signals")]
+                        ClientActorMessage::FetchSignals{ done } => {
+                            let res = self.signals_fetch().await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to create signal: {:#?}", err);
                             }
                         }
                     }
@@ -402,6 +459,20 @@ impl ClientActor {
             .map_err(|_| RemoteError::InternalServerError)??;
 
         Ok(())
+    }
+
+    #[cfg(feature = "signals")]
+    pub async fn signals_send(&self, ttl: u32, name: String, value: Vec<u8>) -> Result<(), Error> {
+        self.client.rpc(CreateSignal { ttl, name, value }).await?;
+        Ok(())
+    }
+
+    #[cfg(feature = "signals")]
+    pub async fn signals_fetch(&self) -> Result<Vec<Signal>, Error> {
+        // TODO: real IDs for requests
+        let id = [0u8; 32];
+        let signals = self.client.rpc(GetSignals { req: id }).await?;
+        Ok(signals)
     }
 }
 

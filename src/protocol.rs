@@ -20,6 +20,10 @@ pub enum N0desProtocol {
     PutMetrics(PutMetrics),
     #[rpc(tx=oneshot::Sender<Pong>)]
     Ping(Ping),
+    #[rpc(tx=oneshot::Sender<()>)]
+    CreateSignal(CreateSignal),
+    #[rpc(tx=oneshot::Sender<Vec<Signal>>)]
+    GetSignals(GetSignals),
 }
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
@@ -57,4 +61,36 @@ pub struct Ping {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Pong {
     pub req: [u8; 16],
+}
+
+/// Signals are opaque data that n0des can ferry between endpoints
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateSignal {
+    pub ttl: u32,
+    pub name: String,
+    pub value: Vec<u8>,
+}
+
+/// Simple ping response
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetSignals {
+    pub req: [u8; 32],
+}
+
+/// Signals are opaque data that n0des can ferry between endpoints
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Signal {
+    pub ttl: u32,
+    pub name: String,
+    pub value: Vec<u8>,
+}
+
+impl From<CreateSignal> for Signal {
+    fn from(msg: CreateSignal) -> Self {
+        Signal {
+            ttl: msg.ttl,
+            name: msg.name,
+            value: msg.value,
+        }
+    }
 }
