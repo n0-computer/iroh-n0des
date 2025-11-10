@@ -19,7 +19,10 @@ use uuid::Uuid;
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
-    protocol::{ALPN, Auth, N0desClient, Ping, PutMetrics, RemoteError},
+    protocol::{
+        ALPN, Auth, CreateSignal, GetSignals, N0desClient, Ping, PutMetrics, RemoteError, Signal,
+    },
+    ticket::N0desTicket,
 };
 
 #[derive(Debug)]
@@ -31,6 +34,35 @@ pub struct Client {
 impl Drop for Client {
     fn drop(&mut self) {
         debug!("n0des client is being dropped");
+    }
+}
+
+impl Client {
+    pub fn builder(endpoint: &Endpoint) -> ClientBuilder {
+        ClientBuilder::new(endpoint)
+    }
+
+    /// Pings the remote node.
+    pub async fn ping(&mut self) -> Result<(), Error> {
+        let req = rand::random();
+        let pong = self.client.rpc(Ping { req }).await?;
+        if pong.req == req {
+            Ok(())
+        } else {
+            Err(Error::Other(anyhow!("unexpected pong response")))
+        }
+    }
+
+    pub async fn signals_send(&self, ttl: u32, name: String, value: Vec<u8>) -> Result<(), Error> {
+        self.client.rpc(CreateSignal { ttl, name, value }).await?;
+        Ok(())
+    }
+
+    pub async fn signals_fetch(&self) -> Result<Vec<Signal>, Error> {
+        // TODO: real IDs for requests
+        let id = [0u8; 32];
+        let signals = self.client.rpc(GetSignals { req: id }).await?;
+        Ok(signals)
     }
 }
 
@@ -213,23 +245,6 @@ pub enum Error {
     Rpc(#[from] irpc::Error),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
-}
-
-impl Client {
-    pub fn builder(endpoint: &Endpoint) -> ClientBuilder {
-        ClientBuilder::new(endpoint)
-    }
-
-    /// Pings the remote node.
-    pub async fn ping(&mut self) -> Result<(), Error> {
-        let req = rand::random();
-        let pong = self.client.rpc(Ping { req }).await?;
-        if pong.req == req {
-            Ok(())
-        } else {
-            Err(Error::Other(anyhow!("unexpected pong response")))
-        }
-    }
 }
 
 struct MetricsTask {
