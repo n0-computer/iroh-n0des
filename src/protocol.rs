@@ -48,11 +48,11 @@ pub struct PutMetrics {
 /// Simple ping requests
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Ping {
-    pub req: [u8; 32],
+    pub req: [u8; 16],
 }
 
 /// Simple ping response
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Pong {
-    pub req: [u8; 32],
+    pub req: [u8; 16],
 }
