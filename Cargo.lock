@@ -1452,6 +1452,7 @@ dependencies = [
  "derive_more 2.0.1",
  "ed25519-dalek",
  "futures-buffered",
+ "getrandom 0.3.4",
  "iroh",
  "iroh-metrics",
  "iroh-n0des-macro",
@@ -2439,14 +2440,15 @@ dependencies = [
 [[package]]
 name = "rcan"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e26a7c6e693bba6b1d0fad7f5e222050404a79a96384eb7052a03b18171b6676"
+source = "git+https://github.com/n0-computer/rcan.git?branch=b5%2Fwasm#037050d8010197a770de47cba6894593da8b67d2"
 dependencies = [
  "anyhow",
  "blake3",
  "derive_more 2.0.1",
  "ed25519-dalek",
+ "getrandom 0.3.4",
  "hex",
+ "n0-future",
  "postcard",
  "rand 0.9.2",
  "serde",
