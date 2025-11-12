@@ -1,16 +1,20 @@
 use std::{
     env::VarError,
+    future::pending,
     str::FromStr,
     sync::{Arc, RwLock},
 };
 
 use anyhow::{Result, anyhow, ensure};
 use iroh::{Endpoint, EndpointAddr, EndpointId, endpoint::ConnectError};
-use iroh_metrics::{Registry, encoding::Encoder};
+use iroh_metrics::{
+    Metric, MetricValue, MetricsGroupSet, Registry,
+    encoding::{Encoder, Update},
+};
 use irpc_iroh::IrohLazyRemoteConnection;
 use n0_error::StackResultExt;
 use n0_future::task::AbortOnDropHandle;
-use n0_future::time::Duration;
+use n0_future::time::{Duration, Interval};
 use rcan::Rcan;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
@@ -19,14 +23,15 @@ use crate::{
     api_secret::ApiSecret,
     caps::Caps,
     protocol::{
-        ALPN, Auth, CreateSignal, GetSignals, N0desClient, Ping, PutMetrics, RemoteError, Signal,
+        ALPN, Auth, CreateSignal, GetSignals, N0desClient, Ping, PutMetrics, PutProjectMetrics,
+        RemoteError, Signal,
     },
 };
 
 #[derive(Debug)]
 pub struct Client {
     client: N0desClient,
-    _metrics_task: Option<AbortOnDropHandle<()>>,
+    _metrics_task: AbortOnDropHandle<()>,
 }
 
 impl Drop for Client {
@@ -75,34 +80,57 @@ pub struct ClientBuilder {
     cap_expiry: Duration,
     cap: Option<Rcan<Caps>>,
     endpoint: Endpoint,
+    enable_project_metrics: Option<Duration>,
     enable_metrics: Option<Duration>,
     remote: Option<EndpointAddr>,
+    registry: Registry,
 }
 
 const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
 
 impl ClientBuilder {
     pub fn new(endpoint: &Endpoint) -> Self {
+        let mut registry = Registry::default();
+        registry.register_all(endpoint.metrics());
+
         Self {
             cap: None,
+            remote: None,
             cap_expiry: DEFAULT_CAP_EXPIRY,
             endpoint: endpoint.clone(),
-            enable_metrics: Some(Duration::from_secs(10)),
-            remote: None,
+            enable_project_metrics: Some(Duration::from_secs(10)),
+            enable_metrics: None,
+            registry,
         }
+    }
+
+    /// Register a metrics group for tracking
+    ///
+    /// The default registered metrics uses only the endpoint
+    pub fn register_metrics_group(mut self, metrics_group_set: &impl MetricsGroupSet) -> Self {
+        self.registry.register_all(metrics_group_set);
+        self
+    }
+
+    /// Set the project metrics collection interval
+    ///
+    /// Defaults to enabled, every 10 seconds.
+    pub fn project_metrics_interval(mut self, interval: Duration) -> Self {
+        self.enable_project_metrics = Some(interval);
+        self
+    }
+
+    /// Disable project metrics collection
+    pub fn disable_project_metrics(mut self) -> Self {
+        self.enable_project_metrics = None;
+        self
     }
 
     /// Set the metrics collection interval
     ///
-    /// Defaults to enabled, every 60 seconds.
+    /// Defaults to disabled.
     pub fn metrics_interval(mut self, interval: Duration) -> Self {
         self.enable_metrics = Some(interval);
-        self
-    }
-
-    /// Disable metrics collection.
-    pub fn disable_metrics(mut self) -> Self {
-        self.enable_metrics = None;
         self
     }
 
@@ -123,6 +151,7 @@ impl ClientBuilder {
         }
     }
 
+    /// Decode an API secret from a str & use it
     pub fn api_secret_from_str(self, secret_key: &str) -> Result<Self> {
         let key = ApiSecret::from_str(secret_key).context("invalid N0DES_SECRET")?;
         self.api_secret(key)
@@ -197,17 +226,17 @@ impl ClientBuilder {
         // If auth fails, the connection is aborted.
         let () = client.rpc(Auth { caps: cap }).await?;
 
-        let metrics_task = self.enable_metrics.map(|interval| {
-            debug!(interval = ?interval, "starting metrics task");
-            AbortOnDropHandle::new(n0_future::task::spawn(
-                MetricsTask {
-                    client: client.clone(),
-                    session_id: Uuid::new_v4(),
-                    endpoint: self.endpoint.clone(),
-                }
-                .run(interval),
-            ))
-        });
+        let metrics_task = AbortOnDropHandle::new(n0_future::task::spawn(
+            MetricsTask {
+                client: client.clone(),
+                session_id: Uuid::new_v4(),
+            }
+            .run(
+                self.registry,
+                self.enable_project_metrics,
+                self.enable_metrics,
+            ),
+        ));
 
         Ok(Client {
             client,
@@ -261,25 +290,105 @@ pub enum Error {
 struct MetricsTask {
     client: N0desClient,
     session_id: Uuid,
-    endpoint: Endpoint,
 }
 
 impl MetricsTask {
-    async fn run(self, interval: Duration) {
-        let mut registry = Registry::default();
-        registry.register_all(self.endpoint.metrics());
-        let registry = Arc::new(RwLock::new(registry));
-        let mut encoder = Encoder::new(registry);
+    async fn run(
+        self,
+        registry: Registry,
+        project_interval: Option<Duration>,
+        metrics_interval: Option<Duration>,
+    ) {
+        if project_interval.is_none() && metrics_interval.is_none() {
+            debug!("all metrics are disabled. stopping metrics reporting task");
+            return;
+        }
 
-        let mut metrics_timer = n0_future::time::interval(interval);
+        let registry = Arc::new(RwLock::new(registry));
+        let mut metrics_encoder = Encoder::new(registry);
+
+        let mut projects_timer = project_interval.map(|d| n0_future::time::interval(d));
+        let mut metrics_timer = metrics_interval.map(|d| n0_future::time::interval(d));
+        let mut delta_clock: u64 = 0;
+        let mut acked_project_metrics: Option<Update> = None;
 
         loop {
-            metrics_timer.tick().await;
-            trace!("metrics send tick");
-            if let Err(err) = self.send_metrics(&mut encoder).await {
-                warn!("failed to push metrics: {:#?}", err);
+            tokio::select! {
+                biased;
+                _ = tick_or_never(&mut projects_timer) => {
+                    trace!("send project metrics tick");
+                    match self.send_project_metrics(delta_clock, &mut acked_project_metrics, &mut metrics_encoder).await {
+                        Ok(updated_clock) => {
+                            delta_clock = updated_clock;
+                        }
+                        Err(err) => {
+                            warn!("failed to push project metrics: {:#?}", err);
+                        }
+                    }
+                }
+                _ = tick_or_never(&mut metrics_timer) => {
+                    if let Err(err) = self.send_metrics(&mut metrics_encoder).await {
+                        warn!("failed to push metrics: {:#?}", err);
+                    }
+                }
             }
         }
+    }
+
+    async fn send_project_metrics(
+        &self,
+        clock: u64,
+        acked_project_metrics: &mut Option<Update>,
+        encoder: &mut Encoder,
+    ) -> Result<u64> {
+        let mut update = encoder.export();
+        if update.schema.is_none() {
+            if let Some(acked) = acked_project_metrics {
+                if acked.values.items.len() == update.values.items.len() {
+                    // schema hasn't changed, we can subtract ack'd metrics from the update
+                    let iter = update.values.items.iter_mut().enumerate();
+                    for (i, update_v) in iter {
+                        if let Some(acked_value) = acked.values.items.get(i) {
+                            match update_v.value() {
+                                MetricValue::Counter(v) => {
+                                    if let MetricValue::Counter(acked) = acked_value {
+                                        let new = v.saturating_sub(*acked);
+                                        *update_v = MetricValue::Counter(new);
+                                    }
+                                }
+                                MetricValue::Gauge(_v) => {
+                                    // TODO - pretty sure this should just report through
+                                }
+                                _ => {
+                                    // TODO - histograms
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let req = PutProjectMetrics {
+            clock,
+            update: update.clone(),
+        };
+
+        let got_clock = self
+            .client
+            .rpc(req)
+            .await
+            .inspect_err(|e| warn!("rpc send metrics error: {e}"))?
+            .inspect_err(|e| warn!("metrics server response error: {e}"))?;
+
+        // TODO - if heights are way off, warn
+        if got_clock != clock {
+            warn!("server returned invalid clock height");
+        }
+
+        *acked_project_metrics = Some(update);
+
+        Ok(got_clock + 1)
     }
 
     async fn send_metrics(&self, encoder: &mut Encoder) -> Result<()> {
@@ -296,6 +405,15 @@ impl MetricsTask {
             .inspect_err(|e| warn!("metrics server response error: {e}"))?;
         trace!("sent metrics");
         Ok(())
+    }
+}
+
+async fn tick_or_never(interval: &mut Option<Interval>) {
+    match interval {
+        Some(i) => {
+            i.tick().await;
+        }
+        None => pending().await, // Never resolves
     }
 }
 

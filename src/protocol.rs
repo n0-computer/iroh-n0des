@@ -18,6 +18,8 @@ pub enum N0desProtocol {
     Auth(Auth),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     PutMetrics(PutMetrics),
+    #[rpc(tx=oneshot::Sender<RemoteResult<u64>>)]
+    PutProjectMetrics(PutProjectMetrics),
     #[rpc(tx=oneshot::Sender<Pong>)]
     Ping(Ping),
     #[rpc(tx=oneshot::Sender<()>)]
@@ -40,6 +42,14 @@ pub enum RemoteError {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Auth {
     pub caps: Rcan<Caps>,
+}
+
+/// Put delta-encoded project metrics on the server.
+/// Project metrics are aggregations.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PutProjectMetrics {
+    pub clock: u64,
+    pub update: iroh_metrics::encoding::Update,
 }
 
 /// Request to store the given metrics data
