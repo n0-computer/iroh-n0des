@@ -28,12 +28,6 @@ pub struct Client {
     _metrics_task: Option<AbortOnDropHandle<()>>,
 }
 
-impl Drop for Client {
-    fn drop(&mut self) {
-        debug!("n0des client is being dropped");
-    }
-}
-
 /// Constructs a n0des client
 pub struct ClientBuilder {
     cap_expiry: Duration,
@@ -143,6 +137,7 @@ impl ClientBuilder {
     }
 
     /// Create a new client, connected to the provide service node
+    #[must_use]
     pub async fn build(self) -> Result<Client, BuildError> {
         debug!("starting iroh-n0des client");
         let remote = self.remote.ok_or(BuildError::MissingRemote)?;
