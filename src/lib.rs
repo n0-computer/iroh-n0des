@@ -1,6 +1,7 @@
 mod client;
 mod n0des;
 
+pub mod api_secret;
 pub mod caps;
 pub mod protocol;
 pub mod simulation;
@@ -14,6 +15,7 @@ pub use anyhow;
 pub use iroh_metrics::Registry;
 
 pub use self::{
+    api_secret::ApiSecret,
     client::{Client, ClientBuilder},
     n0des::N0de,
     protocol::ALPN,
