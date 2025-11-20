@@ -26,7 +26,8 @@ pub async fn main() -> Result<()> {
     let mut rpc_client = Client::builder(&client_endpoint)
         .metrics_interval(Duration::from_secs(2))
         .ssh_key(&alice_ssh_key)?
-        .build(remote_addr.clone())
+        .remote(remote_addr.clone())
+        .build()
         .await?;
 
     rpc_client.ping().await?;
