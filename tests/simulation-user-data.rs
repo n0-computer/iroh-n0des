@@ -1,3 +1,4 @@
+#[cfg(feature = "simulation")]
 mod tests {
     use anyhow::Result;
     use iroh::{Endpoint, protocol::Router};
