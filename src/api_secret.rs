@@ -25,13 +25,8 @@ impl Display for ApiSecret {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Variant0ApiSecret {
+struct Variant0EndpointAddr {
     endpoint_id: EndpointId,
-    info: Variant0AddrInfo,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Variant0AddrInfo {
     addrs: BTreeSet<TransportAddr>,
 }
 
@@ -44,7 +39,7 @@ enum TicketWireFormat {
 #[derive(Serialize, Deserialize)]
 struct Variant0N0desTicket {
     secret: SecretKey,
-    addr: Variant0ApiSecret,
+    addr: Variant0EndpointAddr,
 }
 
 impl Ticket for ApiSecret {
@@ -55,11 +50,9 @@ impl Ticket for ApiSecret {
     fn to_bytes(&self) -> Vec<u8> {
         let data = TicketWireFormat::Variant0(Variant0N0desTicket {
             secret: self.secret.clone(),
-            addr: Variant0ApiSecret {
+            addr: Variant0EndpointAddr {
                 endpoint_id: self.remote.id,
-                info: Variant0AddrInfo {
-                    addrs: self.remote.addrs.clone(),
-                },
+                addrs: self.remote.addrs.clone(),
             },
         });
         postcard::to_stdvec(&data).expect("postcard serialization failed")
@@ -72,7 +65,7 @@ impl Ticket for ApiSecret {
             secret,
             remote: EndpointAddr {
                 id: addr.endpoint_id,
-                addrs: addr.info.addrs.clone(),
+                addrs: addr.addrs.clone(),
             },
         })
     }

@@ -45,6 +45,7 @@ n0-error = "0.1.0"
 iroh-tickets = "0.2.0"
 
 [dev-dependencies]
+temp_env_vars = "0.2.1"
 tokio = { version = "1.45", features = ["macros", "rt", "rt-multi-thread"] }
 
 [workspace]

@@ -38,6 +38,7 @@ pub struct ClientBuilder {
 }
 
 const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
+const API_SECRET_ENV_VAR_NAME: &str = "N0DES_API_SECRET";
 
 impl ClientBuilder {
     pub fn new(endpoint: &Endpoint) -> Self {
@@ -66,23 +67,24 @@ impl ClientBuilder {
 
     /// Check N0DES_SECRET_KEY environment variable for a valid API secret
     pub fn api_secret_from_env(self) -> Result<Self> {
-        match std::env::var("N0DES_API_SECRET") {
+        match std::env::var(API_SECRET_ENV_VAR_NAME) {
             Ok(ticket_string) => {
-                let ticket = ApiSecret::from_str(&ticket_string).context("invalid N0DES_SECRET")?;
+                let ticket = ApiSecret::from_str(&ticket_string)
+                    .context("invalid {API_SECRET_ENV_VAR_NAME}")?;
                 self.api_secret(ticket)
             }
-            Err(VarError::NotPresent) => {
-                Err(anyhow!("N0DES_SECRET_KEY environment variable is not set"))
-            }
+            Err(VarError::NotPresent) => Err(anyhow!(
+                "{API_SECRET_ENV_VAR_NAME} environment variable is not set"
+            )),
             Err(VarError::NotUnicode(e)) => Err(anyhow!(
-                "N0DES_SECRET_KEY environment variable is not valid unicode: {:?}",
+                "{API_SECRET_ENV_VAR_NAME} environment variable is not valid unicode: {:?}",
                 e
             )),
         }
     }
 
     pub fn api_secret_from_str(self, secret_key: &str) -> Result<Self> {
-        let key = ApiSecret::from_str(secret_key).context("invalid N0DES_SECRET")?;
+        let key = ApiSecret::from_str(secret_key).context("invalid n0des api secret")?;
         self.api_secret(key)
     }
 
@@ -137,7 +139,7 @@ impl ClientBuilder {
     }
 
     /// Create a new client, connected to the provide service node
-    #[must_use]
+    #[must_use = "dropping the client will silently cancel all client tasks"]
     pub async fn build(self) -> Result<Client, BuildError> {
         debug!("starting iroh-n0des client");
         let remote = self.remote.ok_or(BuildError::MissingRemote)?;
@@ -271,10 +273,17 @@ impl MetricsTask {
 #[cfg(test)]
 mod tests {
     use iroh::{Endpoint, EndpointAddr, SecretKey};
+    use temp_env_vars::temp_env_vars;
 
-    use crate::{Client, api_secret::ApiSecret, caps::Caps};
+    use crate::{
+        Client,
+        api_secret::ApiSecret,
+        caps::{Cap, Caps},
+        client::API_SECRET_ENV_VAR_NAME,
+    };
 
     #[tokio::test]
+    #[temp_env_vars]
     async fn test_api_key_from_env() {
         // construct
         let mut rng = rand::rng();
@@ -282,7 +291,7 @@ mod tests {
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
         let n0des_ticket = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
         unsafe {
-            std::env::set_var("N0DES_API_SECRET", n0des_ticket.to_string());
+            std::env::set_var(API_SECRET_ENV_VAR_NAME, n0des_ticket.to_string());
         };
 
         let endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
@@ -302,10 +311,7 @@ mod tests {
             Caps::for_shared_secret(),
         )
         .unwrap();
-        assert_eq!(builder.cap, Some(rcan));
-
-        unsafe {
-            std::env::remove_var("N0DES_API_SECRET");
-        };
+        assert_eq!(builder.cap, Some(rcan.clone()));
+        assert_eq!(rcan.capability(), &Caps::new([Cap::Client]));
     }
 }
