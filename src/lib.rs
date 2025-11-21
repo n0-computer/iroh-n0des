@@ -4,6 +4,7 @@ mod n0des;
 pub mod api_secret;
 pub mod caps;
 pub mod protocol;
+#[cfg(feature = "simulation")]
 pub mod simulation;
 
 pub use iroh_n0des_macro::sim;
