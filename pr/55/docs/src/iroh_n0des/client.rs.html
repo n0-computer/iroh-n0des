@@ -6,7 +6,7 @@
 <a href=#6 id=6 data-nosnippet>6</a>
 <a href=#7 id=7 data-nosnippet>7</a><span class="kw">use </span>anyhow::{<span class="prelude-ty">Result</span>, anyhow, ensure};
 <a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span>iroh::{Endpoint, EndpointAddr, EndpointId, endpoint::ConnectError};
-<a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span>iroh_metrics::{MetricsGroupSet, Registry, encoding::Encoder};
+<a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span>iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
 <a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span>irpc_iroh::IrohLazyRemoteConnection;
 <a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span>n0_error::StackResultExt;
 <a href=#12 id=12 data-nosnippet>12</a><span class="kw">use </span>n0_future::{task::AbortOnDropHandle, time::Duration};
@@ -59,8 +59,8 @@
 <a href=#59 id=59 data-nosnippet>59</a>    <span class="doccomment">/// Register a metrics group to forward to n0des
 <a href=#60 id=60 data-nosnippet>60</a>    ///
 <a href=#61 id=61 data-nosnippet>61</a>    /// The default registered metrics uses only the endpoint
-<a href=#62 id=62 data-nosnippet>62</a>    </span><span class="kw">pub fn </span>register_metrics_group(<span class="kw-2">mut </span><span class="self">self</span>, metrics_group_set: <span class="kw-2">&amp;</span><span class="kw">impl </span>MetricsGroupSet) -&gt; <span class="self">Self </span>{
-<a href=#63 id=63 data-nosnippet>63</a>        <span class="self">self</span>.registry.register_all(metrics_group_set);
+<a href=#62 id=62 data-nosnippet>62</a>    </span><span class="kw">pub fn </span>register_metrics_group(<span class="kw-2">mut </span><span class="self">self</span>, metrics_group: Arc&lt;<span class="kw">dyn </span>MetricsGroup&gt;) -&gt; <span class="self">Self </span>{
+<a href=#63 id=63 data-nosnippet>63</a>        <span class="self">self</span>.registry.register(metrics_group);
 <a href=#64 id=64 data-nosnippet>64</a>        <span class="self">self
 <a href=#65 id=65 data-nosnippet>65</a>    </span>}
 <a href=#66 id=66 data-nosnippet>66</a>
