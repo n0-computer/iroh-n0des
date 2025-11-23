@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
-    protocol::{ALPN, Auth, N0desClient, Ping, PutMetrics, RemoteError},
+    protocol::{ALPN, Auth, N0desClient, Ping, Pong, PutMetrics, RemoteError},
 };
 
 #[derive(Debug)]
@@ -235,37 +235,41 @@ impl Client {
     }
 
     /// Pings the remote node.
-    pub async fn ping(&mut self) -> Result<(), Error> {
+    pub async fn ping(&mut self) -> Result<Pong, Error> {
         let (tx, rx) = oneshot::channel();
         self.message_channel
             .send(ClientActorMessage::Ping { done: tx })
             .await
             .map_err(|_| Error::Other(anyhow!("sending ping request")))?;
+
         rx.await
-            .map_err(|_| Error::Other(anyhow!("receiving pong response")))?;
-        Ok(())
-        // let pong = self.client.rpc(Ping { req }).await?;
-        // if pong.req == req {
-        //     Ok(())
-        // } else {
-        //     Err(Error::Other(anyhow!("unexpected pong response")))
-        // }
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+            .map_err(Error::Remote)
     }
 
     /// immediately send a single dump of metrics to n0des. It's not necessary
     /// to call this function if you're using a non-zero metrics interval,
     /// which will automatically propagate metrics on the set interval for you
     pub async fn send_metrics(&self) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
         self.message_channel
-            .send(ClientActorMessage::SendMetrics)
+            .send(ClientActorMessage::SendMetrics { done: tx })
             .await
-            .map_err(|_| Error::Other(anyhow!("sending metrics")))
+            .map_err(|_| Error::Other(anyhow!("sending metrics")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+            .map_err(Error::Remote)
     }
 }
 
 enum ClientActorMessage {
-    SendMetrics,
-    Ping { done: oneshot::Sender<()> },
+    SendMetrics {
+        done: oneshot::Sender<Result<(), RemoteError>>,
+    },
+    Ping {
+        done: oneshot::Sender<Result<Pong, RemoteError>>,
+    },
 }
 
 struct ClientActor {
@@ -293,13 +297,15 @@ impl ClientActor {
                 Some(msg) = inbox.recv() => {
                     match msg {
                         ClientActorMessage::Ping{ done } => {
-                            if let Err(err) = self.send_ping(done).await {
+                            let res = self.send_ping().await;
+                            if let Err(err) = done.send(res) {
                                 warn!("failed to send ping: {:#?}", err);
                             }
                         },
-                        ClientActorMessage::SendMetrics => {
+                        ClientActorMessage::SendMetrics{ done } => {
                             debug!("sending metrics manually triggered");
-                            if let Err(err) = self.send_metrics(&mut encoder).await {
+                            let res = self.send_metrics(&mut encoder).await;
+                            if let Err(err) = done.send(res) {
                                 warn!("failed to push metrics: {:#?}", err);
                             }
                         }
@@ -316,7 +322,7 @@ impl ClientActor {
     }
 
     // sends an authorization request to the server
-    async fn auth(&mut self) -> Result<()> {
+    async fn auth(&mut self) -> Result<(), RemoteError> {
         if self.authorized {
             return Ok(());
         }
@@ -325,23 +331,24 @@ impl ClientActor {
                 caps: self.capabilities.clone(),
             })
             .await
-            .inspect_err(|e| debug!("authorization failed: {:?}", e))?;
+            .inspect_err(|e| debug!("authorization failed: {:?}", e))
+            .map_err(|e| RemoteError::AuthError(e.to_string()))?;
         self.authorized = true;
         Ok(())
     }
 
-    async fn send_ping(&mut self, done: oneshot::Sender<()>) -> Result<()> {
+    async fn send_ping(&mut self) -> Result<Pong, RemoteError> {
         self.auth().await?;
+
         let req = rand::random();
         self.client
             .rpc(Ping { req })
             .await
-            .inspect_err(|e| warn!("rpc ping error: {e}"))?;
-        let _ = done.send(());
-        Ok(())
+            .inspect_err(|e| warn!("rpc ping error: {e}"))
+            .map_err(|_| RemoteError::InternalServerError)
     }
 
-    async fn send_metrics(&mut self, encoder: &mut Encoder) -> Result<()> {
+    async fn send_metrics(&mut self, encoder: &mut Encoder) -> Result<(), RemoteError> {
         self.auth().await?;
 
         let update = encoder.export();
@@ -353,10 +360,7 @@ impl ClientActor {
         self.client
             .rpc(req)
             .await
-            .inspect_err(|e| warn!("rpc send metrics error: {e}"))?
-            .inspect_err(|e| warn!("metrics server response error: {e}"))?;
-        trace!("sent metrics");
-        Ok(())
+            .map_err(|_| RemoteError::InternalServerError)?
     }
 }
 
@@ -379,9 +383,9 @@ mod tests {
         let mut rng = rand::rng();
         let shared_secret = SecretKey::generate(&mut rng);
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
-        let n0des_ticket = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
+        let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
         unsafe {
-            std::env::set_var(API_SECRET_ENV_VAR_NAME, n0des_ticket.to_string());
+            std::env::set_var(API_SECRET_ENV_VAR_NAME, api_secret.to_string());
         };
 
         let endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
@@ -403,5 +407,31 @@ mod tests {
         .unwrap();
         assert_eq!(builder.cap, Some(rcan.clone()));
         assert_eq!(rcan.capability(), &Caps::new([Cap::Client]));
+    }
+
+    /// Assert that disabling metrics interval can manually send metrics without
+    /// panicing. Metrics sending itself will fail.
+    #[tokio::test]
+    async fn test_no_metrics_interval() {
+        let mut rng = rand::rng();
+        let shared_secret = SecretKey::generate(&mut rng);
+        let fake_endpoint_id = SecretKey::generate(&mut rng).public();
+        let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
+
+        let endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
+            .bind()
+            .await
+            .unwrap();
+
+        let client = Client::builder(&endpoint)
+            .disable_metrics_interval()
+            .api_secret(api_secret)
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+
+        let err = client.send_metrics().await;
+        assert!(err.is_err());
     }
 }
