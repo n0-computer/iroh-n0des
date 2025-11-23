@@ -3,7 +3,7 @@
 //! from [iroh] endpoints into a central hub for monitoring.
 //!
 //! Typical setup looks something like this:
-//! ```
+//! ```no_run
 //! use iroh::Endpoint;
 //! use iroh_n0des::Client;
 //!
