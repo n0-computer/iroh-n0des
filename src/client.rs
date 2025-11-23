@@ -21,13 +21,17 @@ use crate::{
     protocol::{ALPN, Auth, N0desClient, Ping, Pong, PutMetrics, RemoteError},
 };
 
+/// Client is the main handle for interacting with n0des. It communicates with
+/// n0des entirely through an iroh endpoint
+///
 #[derive(Debug)]
 pub struct Client {
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
     _actor_task: AbortOnDropHandle<()>,
 }
 
-/// Constructs a n0des client
+/// ClientBuilder provides configures and builds a n0des client, typically
+/// created with [`Client::builder`]
 pub struct ClientBuilder {
     #[allow(dead_code)]
     cap_expiry: Duration,
@@ -78,7 +82,7 @@ impl ClientBuilder {
         self
     }
 
-    /// Check N0DES_SECRET_KEY environment variable for a valid API secret
+    /// Check N0DES_API_SECRET environment variable for a valid API secret
     pub fn api_secret_from_env(self) -> Result<Self> {
         match std::env::var(API_SECRET_ENV_VAR_NAME) {
             Ok(ticket_string) => {
@@ -235,7 +239,7 @@ impl Client {
     }
 
     /// Pings the remote node.
-    pub async fn ping(&mut self) -> Result<Pong, Error> {
+    pub async fn ping(&self) -> Result<Pong, Error> {
         let (tx, rx) = oneshot::channel();
         self.message_channel
             .send(ClientActorMessage::Ping { done: tx })
@@ -419,7 +423,7 @@ mod tests {
     }
 
     /// Assert that disabling metrics interval can manually send metrics without
-    /// panicing. Metrics sending itself will fail.
+    /// panicking. Metrics sending itself is expected to fail.
     #[tokio::test]
     async fn test_no_metrics_interval() {
         let mut rng = rand::rng();
