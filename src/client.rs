@@ -24,7 +24,7 @@ use crate::{
 pub struct Client {
     client: N0desClient,
     metrics_channel: tokio::sync::mpsc::Sender<()>,
-    _metrics_task: Option<AbortOnDropHandle<()>>,
+    _metrics_task: AbortOnDropHandle<()>,
 }
 
 /// Constructs a n0des client
@@ -33,7 +33,7 @@ pub struct ClientBuilder {
     cap_expiry: Duration,
     cap: Option<Rcan<Caps>>,
     endpoint: Endpoint,
-    enable_metrics: Option<Duration>,
+    metrics_interval: Option<Duration>,
     remote: Option<EndpointAddr>,
     registry: Registry,
 }
@@ -50,7 +50,7 @@ impl ClientBuilder {
             cap: None,
             cap_expiry: DEFAULT_CAP_EXPIRY,
             endpoint: endpoint.clone(),
-            enable_metrics: Some(Duration::from_secs(10)),
+            metrics_interval: Some(Duration::from_secs(10)),
             remote: None,
             registry,
         }
@@ -68,13 +68,13 @@ impl ClientBuilder {
     ///
     /// Defaults to enabled, every 60 seconds.
     pub fn metrics_interval(mut self, interval: Duration) -> Self {
-        self.enable_metrics = Some(interval);
+        self.metrics_interval = Some(interval);
         self
     }
 
     /// Disable metrics collection.
-    pub fn disable_metrics(mut self) -> Self {
-        self.enable_metrics = None;
+    pub fn disable_metrics_interval(mut self) -> Self {
+        self.metrics_interval = None;
         self
     }
 
@@ -172,16 +172,13 @@ impl ClientBuilder {
         let () = client.rpc(Auth { caps: cap }).await?;
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
-        let metrics_task = self.enable_metrics.map(|interval| {
-            debug!(interval = ?interval, "starting metrics task");
-            AbortOnDropHandle::new(n0_future::task::spawn(
-                MetricsTask {
-                    client: client.clone(),
-                    session_id: Uuid::new_v4(),
-                }
-                .run(self.registry, interval, rx),
-            ))
-        });
+        let metrics_task = AbortOnDropHandle::new(n0_future::task::spawn(
+            MetricsTask {
+                client: client.clone(),
+                session_id: Uuid::new_v4(),
+            }
+            .run(self.registry, self.metrics_interval, rx),
+        ));
 
         Ok(Client {
             client,
@@ -269,18 +266,19 @@ impl MetricsTask {
     async fn run(
         self,
         registry: Registry,
-        interval: Duration,
+        interval: Option<Duration>,
         mut trigger: tokio::sync::mpsc::Receiver<()>,
     ) {
         let registry = Arc::new(RwLock::new(registry));
         let mut encoder = Encoder::new(registry);
+        let interval = interval.unwrap_or(Duration::from_secs(0));
 
         let mut metrics_timer = n0_future::time::interval(interval);
         loop {
             tokio::select! {
                 biased;
                 _ = trigger.recv() => {
-                    trace!("metrics send tick");
+                    debug!("sending metrics manually triggered");
                     if let Err(err) = self.send_metrics(&mut encoder).await {
                         warn!("failed to push metrics: {:#?}", err);
                     }
