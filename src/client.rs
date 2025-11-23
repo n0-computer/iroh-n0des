@@ -250,7 +250,7 @@ impl Client {
     /// immediately send a single dump of metrics to n0des. It's not necessary
     /// to call this function if you're using a non-zero metrics interval,
     /// which will automatically propagate metrics on the set interval for you
-    pub async fn send_metrics(&self) -> Result<(), Error> {
+    pub async fn push_metrics(&self) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.message_channel
             .send(ClientActorMessage::SendMetrics { done: tx })
@@ -288,10 +288,10 @@ impl ClientActor {
     ) {
         let registry = Arc::new(RwLock::new(registry));
         let mut encoder = Encoder::new(registry);
-        let interval = interval.unwrap_or(Duration::from_secs(0));
-
-        let mut metrics_timer = n0_future::time::interval(interval);
+        let mut metrics_timer = interval.map(|interval| n0_future::time::interval(interval));
+        trace!("starting client actor");
         loop {
+            trace!("client actor tick");
             tokio::select! {
                 biased;
                 Some(msg) = inbox.recv() => {
@@ -303,7 +303,7 @@ impl ClientActor {
                             }
                         },
                         ClientActorMessage::SendMetrics{ done } => {
-                            debug!("sending metrics manually triggered");
+                            trace!("sending metrics manually triggered");
                             let res = self.send_metrics(&mut encoder).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to push metrics: {:#?}", err);
@@ -311,7 +311,13 @@ impl ClientActor {
                         }
                     }
                 }
-                _ = metrics_timer.tick() => {
+                _ = async {
+                    if let Some(ref mut timer) = metrics_timer {
+                        timer.tick().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
                     trace!("metrics send tick");
                     if let Err(err) = self.send_metrics(&mut encoder).await {
                         warn!("failed to push metrics: {:#?}", err);
@@ -326,6 +332,7 @@ impl ClientActor {
         if self.authorized {
             return Ok(());
         }
+        trace!("client authorizing");
         self.client
             .rpc(Auth {
                 caps: self.capabilities.clone(),
@@ -338,6 +345,7 @@ impl ClientActor {
     }
 
     async fn send_ping(&mut self) -> Result<Pong, RemoteError> {
+        trace!("client actor send ping");
         self.auth().await?;
 
         let req = rand::random();
@@ -349,6 +357,7 @@ impl ClientActor {
     }
 
     async fn send_metrics(&mut self, encoder: &mut Encoder) -> Result<(), RemoteError> {
+        trace!("client actor send metrics");
         self.auth().await?;
 
         let update = encoder.export();
@@ -431,7 +440,7 @@ mod tests {
             .await
             .unwrap();
 
-        let err = client.send_metrics().await;
+        let err = client.push_metrics().await;
         assert!(err.is_err());
     }
 }
