@@ -11,6 +11,7 @@ use irpc_iroh::IrohLazyRemoteConnection;
 use n0_error::StackResultExt;
 use n0_future::{task::AbortOnDropHandle, time::Duration};
 use rcan::Rcan;
+use tokio::sync::oneshot;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
@@ -22,9 +23,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Client {
-    client: N0desClient,
-    metrics_channel: tokio::sync::mpsc::Sender<()>,
-    _metrics_task: AbortOnDropHandle<()>,
+    message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
+    _actor_task: AbortOnDropHandle<()>,
 }
 
 /// Constructs a n0des client
@@ -96,6 +96,7 @@ impl ClientBuilder {
         }
     }
 
+    /// set client API secret from an encoded string
     pub fn api_secret_from_str(self, secret_key: &str) -> Result<Self> {
         let key = ApiSecret::from_str(secret_key).context("invalid n0des api secret")?;
         self.api_secret(key)
@@ -163,27 +164,25 @@ impl ClientBuilder {
     pub async fn build(self) -> Result<Client, BuildError> {
         debug!("starting iroh-n0des client");
         let remote = self.remote.ok_or(BuildError::MissingRemote)?;
-        let cap = self.cap.ok_or(BuildError::MissingCapability)?;
+        let capabilities = self.cap.ok_or(BuildError::MissingCapability)?;
 
-        let conn = IrohLazyRemoteConnection::new(self.endpoint.clone(), remote, ALPN.to_vec());
+        let conn = IrohLazyRemoteConnection::new(self.endpoint, remote, ALPN.to_vec());
         let client = N0desClient::boxed(conn);
-
-        // If auth fails, the connection is aborted.
-        let () = client.rpc(Auth { caps: cap }).await?;
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         let metrics_task = AbortOnDropHandle::new(n0_future::task::spawn(
-            MetricsTask {
-                client: client.clone(),
+            ClientActor {
+                capabilities,
+                client,
                 session_id: Uuid::new_v4(),
+                authorized: false,
             }
             .run(self.registry, self.metrics_interval, rx),
         ));
 
         Ok(Client {
-            client,
-            metrics_channel: tx,
-            _metrics_task: metrics_task,
+            message_channel: tx,
+            _actor_task: metrics_task,
         })
     }
 }
@@ -237,37 +236,51 @@ impl Client {
 
     /// Pings the remote node.
     pub async fn ping(&mut self) -> Result<(), Error> {
-        let req = rand::random();
-        let pong = self.client.rpc(Ping { req }).await?;
-        if pong.req == req {
-            Ok(())
-        } else {
-            Err(Error::Other(anyhow!("unexpected pong response")))
-        }
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::Ping { done: tx })
+            .await
+            .map_err(|_| Error::Other(anyhow!("sending ping request")))?;
+        rx.await
+            .map_err(|_| Error::Other(anyhow!("receiving pong response")))?;
+        Ok(())
+        // let pong = self.client.rpc(Ping { req }).await?;
+        // if pong.req == req {
+        //     Ok(())
+        // } else {
+        //     Err(Error::Other(anyhow!("unexpected pong response")))
+        // }
     }
 
     /// immediately send a single dump of metrics to n0des. It's not necessary
     /// to call this function if you're using a non-zero metrics interval,
     /// which will automatically propagate metrics on the set interval for you
     pub async fn send_metrics(&self) -> Result<(), Error> {
-        self.metrics_channel
-            .send(())
+        self.message_channel
+            .send(ClientActorMessage::SendMetrics)
             .await
             .map_err(|_| Error::Other(anyhow!("sending metrics")))
     }
 }
 
-struct MetricsTask {
-    client: N0desClient,
-    session_id: Uuid,
+enum ClientActorMessage {
+    SendMetrics,
+    Ping { done: oneshot::Sender<()> },
 }
 
-impl MetricsTask {
+struct ClientActor {
+    capabilities: Rcan<Caps>,
+    client: N0desClient,
+    session_id: Uuid,
+    authorized: bool,
+}
+
+impl ClientActor {
     async fn run(
-        self,
+        mut self,
         registry: Registry,
         interval: Option<Duration>,
-        mut trigger: tokio::sync::mpsc::Receiver<()>,
+        mut inbox: tokio::sync::mpsc::Receiver<ClientActorMessage>,
     ) {
         let registry = Arc::new(RwLock::new(registry));
         let mut encoder = Encoder::new(registry);
@@ -277,10 +290,19 @@ impl MetricsTask {
         loop {
             tokio::select! {
                 biased;
-                _ = trigger.recv() => {
-                    debug!("sending metrics manually triggered");
-                    if let Err(err) = self.send_metrics(&mut encoder).await {
-                        warn!("failed to push metrics: {:#?}", err);
+                Some(msg) = inbox.recv() => {
+                    match msg {
+                        ClientActorMessage::Ping{ done } => {
+                            if let Err(err) = self.send_ping(done).await {
+                                warn!("failed to send ping: {:#?}", err);
+                            }
+                        },
+                        ClientActorMessage::SendMetrics => {
+                            debug!("sending metrics manually triggered");
+                            if let Err(err) = self.send_metrics(&mut encoder).await {
+                                warn!("failed to push metrics: {:#?}", err);
+                            }
+                        }
                     }
                 }
                 _ = metrics_timer.tick() => {
@@ -293,7 +315,35 @@ impl MetricsTask {
         }
     }
 
-    async fn send_metrics(&self, encoder: &mut Encoder) -> Result<()> {
+    // sends an authorization request to the server
+    async fn auth(&mut self) -> Result<()> {
+        if self.authorized {
+            return Ok(());
+        }
+        self.client
+            .rpc(Auth {
+                caps: self.capabilities.clone(),
+            })
+            .await
+            .inspect_err(|e| debug!("authorization failed: {:?}", e))?;
+        self.authorized = true;
+        Ok(())
+    }
+
+    async fn send_ping(&mut self, done: oneshot::Sender<()>) -> Result<()> {
+        self.auth().await?;
+        let req = rand::random();
+        self.client
+            .rpc(Ping { req })
+            .await
+            .inspect_err(|e| warn!("rpc ping error: {e}"))?;
+        let _ = done.send(());
+        Ok(())
+    }
+
+    async fn send_metrics(&mut self, encoder: &mut Encoder) -> Result<()> {
+        self.auth().await?;
+
         let update = encoder.export();
         let req = PutMetrics {
             session_id: self.session_id,
