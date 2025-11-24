@@ -22,8 +22,27 @@ use crate::{
 };
 
 /// Client is the main handle for interacting with n0des. It communicates with
-/// n0des entirely through an iroh endpoint
+/// n0des entirely through an iroh endpoint, and is configured through a builder.
+/// Client requires either an Ssh Key or [`ApiSecret`]
 ///
+/// ```no_run
+/// use iroh_n0des::Client;
+///
+/// async fn build_client() -> anyhow::Result<()> {
+///     let endpoint = iroh::Endpoint::bind().await?;
+///
+///     // needs N0DES_API_SECRET set to an environment variable
+///     // client will now push endpoint metrics to n0des.
+///     let client = Client::builder(&endpoint)
+///         .api_secret_from_str("MY_API_SECRET")?
+///         .build()
+///         .await;
+///
+///     Ok(())
+/// }
+/// ```
+///
+/// [`ApiSecret`]: crate::api_secret::ApiSecret
 #[derive(Debug)]
 pub struct Client {
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,

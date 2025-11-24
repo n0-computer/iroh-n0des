@@ -50,7 +50,7 @@ impl std::ops::Deref for Caps {
 
 /// A capability is the capacity to do something. Capabilities are embedded
 /// within signed tokens that dictate who created them, and who they apply to.
-/// Caps follow the [object capability model], where posession of a valid
+/// Caps follow the [object capability model], where possession of a valid
 /// capability token is the canonical source of authorization. This is different
 /// from an access control list approach where users authenticate, and their
 /// current set of capabilities are stored within a database.

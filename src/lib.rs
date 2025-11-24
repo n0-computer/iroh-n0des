@@ -23,7 +23,6 @@
 //!
 //!     Ok(())
 //! }
-//!
 //! ```
 //!
 //! [n0des]: https://n0des.iroh.computer
