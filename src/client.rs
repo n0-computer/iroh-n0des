@@ -6,34 +6,59 @@ use std::{
 
 use anyhow::{Result, anyhow, ensure};
 use iroh::{Endpoint, EndpointAddr, EndpointId, endpoint::ConnectError};
-use iroh_metrics::{Registry, encoding::Encoder};
+use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
 use irpc_iroh::IrohLazyRemoteConnection;
 use n0_error::StackResultExt;
 use n0_future::{task::AbortOnDropHandle, time::Duration};
 use rcan::Rcan;
+use tokio::sync::oneshot;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
-    protocol::{ALPN, Auth, N0desClient, Ping, PutMetrics, RemoteError},
+    protocol::{ALPN, Auth, N0desClient, Ping, Pong, PutMetrics, RemoteError},
 };
 
+/// Client is the main handle for interacting with n0des. It communicates with
+/// n0des entirely through an iroh endpoint, and is configured through a builder.
+/// Client requires either an Ssh Key or [`ApiSecret`]
+///
+/// ```no_run
+/// use iroh_n0des::Client;
+///
+/// async fn build_client() -> anyhow::Result<()> {
+///     let endpoint = iroh::Endpoint::bind().await?;
+///
+///     // needs N0DES_API_SECRET set to an environment variable
+///     // client will now push endpoint metrics to n0des.
+///     let client = Client::builder(&endpoint)
+///         .api_secret_from_str("MY_API_SECRET")?
+///         .build()
+///         .await;
+///
+///     Ok(())
+/// }
+/// ```
+///
+/// [`ApiSecret`]: crate::api_secret::ApiSecret
 #[derive(Debug)]
 pub struct Client {
-    client: N0desClient,
-    _metrics_task: Option<AbortOnDropHandle<()>>,
+    message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
+    _actor_task: AbortOnDropHandle<()>,
 }
 
-/// Constructs a n0des client
+/// ClientBuilder provides configures and builds a n0des client, typically
+/// created with [`Client::builder`]
 pub struct ClientBuilder {
     #[allow(dead_code)]
     cap_expiry: Duration,
     cap: Option<Rcan<Caps>>,
     endpoint: Endpoint,
-    enable_metrics: Option<Duration>,
+    metrics_interval: Option<Duration>,
     remote: Option<EndpointAddr>,
+    registry: Registry,
 }
 
 const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
@@ -41,30 +66,42 @@ const API_SECRET_ENV_VAR_NAME: &str = "N0DES_API_SECRET";
 
 impl ClientBuilder {
     pub fn new(endpoint: &Endpoint) -> Self {
+        let mut registry = Registry::default();
+        registry.register_all(endpoint.metrics());
+
         Self {
             cap: None,
             cap_expiry: DEFAULT_CAP_EXPIRY,
             endpoint: endpoint.clone(),
-            enable_metrics: Some(Duration::from_secs(10)),
+            metrics_interval: Some(Duration::from_secs(10)),
             remote: None,
+            registry,
         }
+    }
+
+    /// Register a metrics group to forward to n0des
+    ///
+    /// The default registered metrics uses only the endpoint
+    pub fn register_metrics_group(mut self, metrics_group: Arc<dyn MetricsGroup>) -> Self {
+        self.registry.register(metrics_group);
+        self
     }
 
     /// Set the metrics collection interval
     ///
     /// Defaults to enabled, every 60 seconds.
     pub fn metrics_interval(mut self, interval: Duration) -> Self {
-        self.enable_metrics = Some(interval);
+        self.metrics_interval = Some(interval);
         self
     }
 
     /// Disable metrics collection.
-    pub fn disable_metrics(mut self) -> Self {
-        self.enable_metrics = None;
+    pub fn disable_metrics_interval(mut self) -> Self {
+        self.metrics_interval = None;
         self
     }
 
-    /// Check N0DES_SECRET_KEY environment variable for a valid API secret
+    /// Check N0DES_API_SECRET environment variable for a valid API secret
     pub fn api_secret_from_env(self) -> Result<Self> {
         match std::env::var(API_SECRET_ENV_VAR_NAME) {
             Ok(ticket_string) => {
@@ -82,6 +119,7 @@ impl ClientBuilder {
         }
     }
 
+    /// set client API secret from an encoded string
     pub fn api_secret_from_str(self, secret_key: &str) -> Result<Self> {
         let key = ApiSecret::from_str(secret_key).context("invalid n0des api secret")?;
         self.api_secret(key)
@@ -149,29 +187,25 @@ impl ClientBuilder {
     pub async fn build(self) -> Result<Client, BuildError> {
         debug!("starting iroh-n0des client");
         let remote = self.remote.ok_or(BuildError::MissingRemote)?;
-        let cap = self.cap.ok_or(BuildError::MissingCapability)?;
+        let capabilities = self.cap.ok_or(BuildError::MissingCapability)?;
 
-        let conn = IrohLazyRemoteConnection::new(self.endpoint.clone(), remote, ALPN.to_vec());
+        let conn = IrohLazyRemoteConnection::new(self.endpoint, remote, ALPN.to_vec());
         let client = N0desClient::boxed(conn);
 
-        // If auth fails, the connection is aborted.
-        let () = client.rpc(Auth { caps: cap }).await?;
-
-        let metrics_task = self.enable_metrics.map(|interval| {
-            debug!(interval = ?interval, "starting metrics task");
-            AbortOnDropHandle::new(n0_future::task::spawn(
-                MetricsTask {
-                    client: client.clone(),
-                    session_id: Uuid::new_v4(),
-                    endpoint: self.endpoint.clone(),
-                }
-                .run(interval),
-            ))
-        });
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let metrics_task = AbortOnDropHandle::new(n0_future::task::spawn(
+            ClientActor {
+                capabilities,
+                client,
+                session_id: Uuid::new_v4(),
+                authorized: false,
+            }
+            .run(self.registry, self.metrics_interval, rx),
+        ));
 
         Ok(Client {
-            client,
-            _metrics_task: metrics_task,
+            message_channel: tx,
+            _actor_task: metrics_task,
         })
     }
 }
@@ -224,42 +258,131 @@ impl Client {
     }
 
     /// Pings the remote node.
-    pub async fn ping(&mut self) -> Result<(), Error> {
-        let req = rand::random();
-        let pong = self.client.rpc(Ping { req }).await?;
-        if pong.req == req {
-            Ok(())
-        } else {
-            Err(Error::Other(anyhow!("unexpected pong response")))
-        }
+    pub async fn ping(&self) -> Result<Pong, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::Ping { done: tx })
+            .await
+            .map_err(|_| Error::Other(anyhow!("sending ping request")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+            .map_err(Error::Remote)
+    }
+
+    /// immediately send a single dump of metrics to n0des. It's not necessary
+    /// to call this function if you're using a non-zero metrics interval,
+    /// which will automatically propagate metrics on the set interval for you
+    pub async fn push_metrics(&self) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::SendMetrics { done: tx })
+            .await
+            .map_err(|_| Error::Other(anyhow!("sending metrics")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+            .map_err(Error::Remote)
     }
 }
 
-struct MetricsTask {
-    client: N0desClient,
-    session_id: Uuid,
-    endpoint: Endpoint,
+enum ClientActorMessage {
+    SendMetrics {
+        done: oneshot::Sender<Result<(), RemoteError>>,
+    },
+    Ping {
+        done: oneshot::Sender<Result<Pong, RemoteError>>,
+    },
 }
 
-impl MetricsTask {
-    async fn run(self, interval: Duration) {
-        let mut registry = Registry::default();
-        registry.register_all(self.endpoint.metrics());
+struct ClientActor {
+    capabilities: Rcan<Caps>,
+    client: N0desClient,
+    session_id: Uuid,
+    authorized: bool,
+}
+
+impl ClientActor {
+    async fn run(
+        mut self,
+        registry: Registry,
+        interval: Option<Duration>,
+        mut inbox: tokio::sync::mpsc::Receiver<ClientActorMessage>,
+    ) {
         let registry = Arc::new(RwLock::new(registry));
         let mut encoder = Encoder::new(registry);
-
-        let mut metrics_timer = n0_future::time::interval(interval);
-
+        let mut metrics_timer = interval.map(|interval| n0_future::time::interval(interval));
+        trace!("starting client actor");
         loop {
-            metrics_timer.tick().await;
-            trace!("metrics send tick");
-            if let Err(err) = self.send_metrics(&mut encoder).await {
-                warn!("failed to push metrics: {:#?}", err);
+            trace!("client actor tick");
+            tokio::select! {
+                biased;
+                Some(msg) = inbox.recv() => {
+                    match msg {
+                        ClientActorMessage::Ping{ done } => {
+                            let res = self.send_ping().await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to send ping: {:#?}", err);
+                            }
+                        },
+                        ClientActorMessage::SendMetrics{ done } => {
+                            trace!("sending metrics manually triggered");
+                            let res = self.send_metrics(&mut encoder).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to push metrics: {:#?}", err);
+                            }
+                        }
+                    }
+                }
+                _ = async {
+                    if let Some(ref mut timer) = metrics_timer {
+                        timer.tick().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    trace!("metrics send tick");
+                    if let Err(err) = self.send_metrics(&mut encoder).await {
+                        warn!("failed to push metrics: {:#?}", err);
+                    }
+                },
             }
         }
     }
 
-    async fn send_metrics(&self, encoder: &mut Encoder) -> Result<()> {
+    // sends an authorization request to the server
+    async fn auth(&mut self) -> Result<(), RemoteError> {
+        if self.authorized {
+            return Ok(());
+        }
+        trace!("client authorizing");
+        self.client
+            .rpc(Auth {
+                caps: self.capabilities.clone(),
+            })
+            .await
+            .inspect_err(|e| debug!("authorization failed: {:?}", e))
+            .map_err(|e| RemoteError::AuthError(e.to_string()))?;
+        self.authorized = true;
+        Ok(())
+    }
+
+    async fn send_ping(&mut self) -> Result<Pong, RemoteError> {
+        trace!("client actor send ping");
+        self.auth().await?;
+
+        let req = rand::random();
+        self.client
+            .rpc(Ping { req })
+            .await
+            .inspect_err(|e| warn!("rpc ping error: {e}"))
+            .map_err(|_| RemoteError::InternalServerError)
+    }
+
+    async fn send_metrics(&mut self, encoder: &mut Encoder) -> Result<(), RemoteError> {
+        trace!("client actor send metrics");
+        self.auth().await?;
+
         let update = encoder.export();
         let req = PutMetrics {
             session_id: self.session_id,
@@ -269,10 +392,7 @@ impl MetricsTask {
         self.client
             .rpc(req)
             .await
-            .inspect_err(|e| warn!("rpc send metrics error: {e}"))?
-            .inspect_err(|e| warn!("metrics server response error: {e}"))?;
-        trace!("sent metrics");
-        Ok(())
+            .map_err(|_| RemoteError::InternalServerError)?
     }
 }
 
@@ -295,9 +415,9 @@ mod tests {
         let mut rng = rand::rng();
         let shared_secret = SecretKey::generate(&mut rng);
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
-        let n0des_ticket = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
+        let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
         unsafe {
-            std::env::set_var(API_SECRET_ENV_VAR_NAME, n0des_ticket.to_string());
+            std::env::set_var(API_SECRET_ENV_VAR_NAME, api_secret.to_string());
         };
 
         let endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
@@ -319,5 +439,31 @@ mod tests {
         .unwrap();
         assert_eq!(builder.cap, Some(rcan.clone()));
         assert_eq!(rcan.capability(), &Caps::new([Cap::Client]));
+    }
+
+    /// Assert that disabling metrics interval can manually send metrics without
+    /// panicking. Metrics sending itself is expected to fail.
+    #[tokio::test]
+    async fn test_no_metrics_interval() {
+        let mut rng = rand::rng();
+        let shared_secret = SecretKey::generate(&mut rng);
+        let fake_endpoint_id = SecretKey::generate(&mut rng).public();
+        let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
+
+        let endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
+            .bind()
+            .await
+            .unwrap();
+
+        let client = Client::builder(&endpoint)
+            .disable_metrics_interval()
+            .api_secret(api_secret)
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+
+        let err = client.push_metrics().await;
+        assert!(err.is_err());
     }
 }

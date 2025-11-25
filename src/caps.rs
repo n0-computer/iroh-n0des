@@ -48,6 +48,14 @@ impl std::ops::Deref for Caps {
     }
 }
 
+/// A capability is the capacity to do something. Capabilities are embedded
+/// within signed tokens that dictate who created them, and who they apply to.
+/// Caps follow the [object capability model], where possession of a valid
+/// capability token is the canonical source of authorization. This is different
+/// from an access control list approach where users authenticate, and their
+/// current set of capabilities are stored within a database.
+///
+/// [object capability model]: https://en.wikipedia.org/wiki/Object-capability_model
 #[derive(
     Debug,
     Eq,
@@ -109,8 +117,10 @@ impl Caps {
     }
 
     /// the class of capabilities that n0des will accept when deriving from a
-    /// shared secret like a [`N0desTicket`]. These should be "client" capabilities:
+    /// shared secret like an [ApiSecret]. These should be "client" capabilities:
     /// typically for users of an app
+    ///
+    /// [ApiSecret]: crate::api_secret::ApiSecret
     pub fn for_shared_secret() -> Self {
         Self::new([Cap::Client])
     }
@@ -188,6 +198,7 @@ impl Capability for RelayCap {
     }
 }
 
+/// A set of capabilities
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
 pub struct CapSet<C: Capability + Ord>(BTreeSet<C>);
 

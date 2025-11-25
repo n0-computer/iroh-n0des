@@ -24,10 +24,12 @@ pub enum N0desProtocol {
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
 
-#[derive(Serialize, Deserialize, thiserror::Error, Debug)]
+#[derive(Clone, Serialize, Deserialize, thiserror::Error, Debug)]
 pub enum RemoteError {
     #[error("Missing capability: {}", _0.to_strings().join(", "))]
     MissingCapability(Caps),
+    #[error("Unauthorized: {}", _0)]
+    AuthError(String),
     #[error("Internal server error")]
     InternalServerError,
 }

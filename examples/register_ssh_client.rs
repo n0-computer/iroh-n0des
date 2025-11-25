@@ -23,7 +23,7 @@ pub async fn main() -> Result<()> {
     tokio::signal::ctrl_c().await?;
 
     // Create iroh services client
-    let mut rpc_client = Client::builder(&client_endpoint)
+    let rpc_client = Client::builder(&client_endpoint)
         .metrics_interval(Duration::from_secs(2))
         .ssh_key(&alice_ssh_key)?
         .remote(remote_addr.clone())
