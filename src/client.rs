@@ -330,7 +330,8 @@ impl ClientActor {
                         ClientActorMessage::Ping{ done } => {
                             let res = self.send_ping().await;
                             if let Err(err) = done.send(res) {
-                                warn!("failed to send ping: {:#?}", err);
+                                debug!("failed to send ping: {:#?}", err);
+                                self.authorized = false;
                             }
                         },
                         ClientActorMessage::SendMetrics{ done } => {
@@ -338,6 +339,7 @@ impl ClientActor {
                             let res = self.send_metrics(&mut encoder).await;
                             if let Err(err) = done.send(res) {
                                 debug!("failed to push metrics: {:#?}", err);
+                                self.authorized = false;
                             }
                         }
                     }
@@ -352,6 +354,7 @@ impl ClientActor {
                     trace!("metrics send tick");
                     if let Err(err) = self.send_metrics(&mut encoder).await {
                         debug!("failed to push metrics: {:#?}", err);
+                        self.authorized = false;
                     }
                 },
             }
