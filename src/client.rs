@@ -128,6 +128,9 @@ impl ClientBuilder {
     /// Use a shared secret & remote n0des endpoint ID contained within a ticket
     /// to construct a n0des client. The resulting client will have "Client"
     /// capabilities.
+    ///
+    /// API secrets include remote details within them, and will set both the
+    /// remote and rcan values on the builder
     pub fn api_secret(mut self, ticket: ApiSecret) -> Result<Self> {
         let local_id = self.endpoint.id();
         let rcan = crate::caps::create_api_token_from_secret_key(
@@ -176,7 +179,7 @@ impl ClientBuilder {
     }
 
     /// Sets the remote to dial, must be provided either directly by calling
-    /// this method, or via the
+    /// this method, or through calling the api_secret builder methods.
     pub fn remote(mut self, remote: impl Into<EndpointAddr>) -> Self {
         self.remote = Some(remote.into());
         self
@@ -322,14 +325,16 @@ impl ClientActor {
                         ClientActorMessage::Ping{ done } => {
                             let res = self.send_ping().await;
                             if let Err(err) = done.send(res) {
-                                warn!("failed to send ping: {:#?}", err);
+                                debug!("failed to send ping: {:#?}", err);
+                                self.authorized = false;
                             }
                         },
                         ClientActorMessage::SendMetrics{ done } => {
                             trace!("sending metrics manually triggered");
                             let res = self.send_metrics(&mut encoder).await;
                             if let Err(err) = done.send(res) {
-                                warn!("failed to push metrics: {:#?}", err);
+                                debug!("failed to push metrics: {:#?}", err);
+                                self.authorized = false;
                             }
                         }
                     }
@@ -343,7 +348,8 @@ impl ClientActor {
                 } => {
                     trace!("metrics send tick");
                     if let Err(err) = self.send_metrics(&mut encoder).await {
-                        warn!("failed to push metrics: {:#?}", err);
+                        debug!("failed to push metrics: {:#?}", err);
+                        self.authorized = false;
                     }
                 },
             }
@@ -384,6 +390,7 @@ impl ClientActor {
         self.auth().await?;
 
         let update = encoder.export();
+        // let delta = update_delta(&self.latest_ackd_update, &update);
         let req = PutMetrics {
             session_id: self.session_id,
             update,
@@ -392,7 +399,9 @@ impl ClientActor {
         self.client
             .rpc(req)
             .await
-            .map_err(|_| RemoteError::InternalServerError)?
+            .map_err(|_| RemoteError::InternalServerError)??;
+
+        Ok(())
     }
 }
 
