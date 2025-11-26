@@ -76,7 +76,7 @@ impl ClientBuilder {
             cap: None,
             cap_expiry: DEFAULT_CAP_EXPIRY,
             endpoint: endpoint.clone(),
-            metrics_interval: Some(Duration::from_secs(10)),
+            metrics_interval: Some(Duration::from_secs(20)),
             remote: None,
             registry,
         }
