@@ -6,7 +6,10 @@ use std::{
 
 use anyhow::{Result, anyhow, ensure};
 use iroh::{Endpoint, EndpointAddr, EndpointId, endpoint::ConnectError};
-use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
+use iroh_metrics::{
+    MetricValue, MetricsGroup, Registry,
+    encoding::{Encoder, Update},
+};
 use irpc_iroh::IrohLazyRemoteConnection;
 use n0_error::StackResultExt;
 use n0_future::{task::AbortOnDropHandle, time::Duration};
@@ -128,6 +131,9 @@ impl ClientBuilder {
     /// Use a shared secret & remote n0des endpoint ID contained within a ticket
     /// to construct a n0des client. The resulting client will have "Client"
     /// capabilities.
+    ///
+    /// API secrets include remote details within them, and will set both the
+    /// remote and rcan values on the builder
     pub fn api_secret(mut self, ticket: ApiSecret) -> Result<Self> {
         let local_id = self.endpoint.id();
         let rcan = crate::caps::create_api_token_from_secret_key(
@@ -176,7 +182,7 @@ impl ClientBuilder {
     }
 
     /// Sets the remote to dial, must be provided either directly by calling
-    /// this method, or via the
+    /// this method, or through calling the api_secret builder methods.
     pub fn remote(mut self, remote: impl Into<EndpointAddr>) -> Self {
         self.remote = Some(remote.into());
         self
@@ -199,6 +205,7 @@ impl ClientBuilder {
                 client,
                 session_id: Uuid::new_v4(),
                 authorized: false,
+                latest_ackd_update: None,
             }
             .run(self.registry, self.metrics_interval, rx),
         ));
@@ -300,6 +307,7 @@ struct ClientActor {
     client: N0desClient,
     session_id: Uuid,
     authorized: bool,
+    latest_ackd_update: Option<Update>,
 }
 
 impl ClientActor {
@@ -329,7 +337,7 @@ impl ClientActor {
                             trace!("sending metrics manually triggered");
                             let res = self.send_metrics(&mut encoder).await;
                             if let Err(err) = done.send(res) {
-                                warn!("failed to push metrics: {:#?}", err);
+                                debug!("failed to push metrics: {:#?}", err);
                             }
                         }
                     }
@@ -343,7 +351,7 @@ impl ClientActor {
                 } => {
                     trace!("metrics send tick");
                     if let Err(err) = self.send_metrics(&mut encoder).await {
-                        warn!("failed to push metrics: {:#?}", err);
+                        debug!("failed to push metrics: {:#?}", err);
                     }
                 },
             }
@@ -384,15 +392,76 @@ impl ClientActor {
         self.auth().await?;
 
         let update = encoder.export();
+        let delta = update_delta(&self.latest_ackd_update, &update);
         let req = PutMetrics {
             session_id: self.session_id,
-            update,
+            update: delta,
         };
 
         self.client
             .rpc(req)
             .await
-            .map_err(|_| RemoteError::InternalServerError)?
+            .map_err(|_| RemoteError::InternalServerError)??;
+
+        self.latest_ackd_update = Some(update);
+
+        Ok(())
+    }
+}
+
+fn update_delta(t1: &Option<Update>, t2: &Update) -> Update {
+    // full reset on schema changes
+    if t2.schema.is_some() {
+        return t2.clone();
+    }
+
+    match t1 {
+        Some(t1) => {
+            if t2.values.items.len() != t2.values.items.len() {
+                return t2.clone();
+            }
+
+            let mut delta = t2.clone();
+            for (i, rhs) in delta.values.items.iter_mut().enumerate() {
+                let lhs = &t1.values.items[i];
+                match (rhs, lhs) {
+                    (MetricValue::Counter(rhs), MetricValue::Counter(lhs)) => {
+                        let res = *rhs - *lhs;
+                        *rhs = res;
+                    }
+                    (MetricValue::Gauge(_), MetricValue::Gauge(_)) => {
+                        // intentionally ignore gagues, gauges are moment-in-time and shouldn't
+                        // be subtracted
+                    }
+                    (
+                        MetricValue::Histogram {
+                            buckets: rhs_buckets,
+                            sum: rhs_sum,
+                            count: rhs_count,
+                        },
+                        MetricValue::Histogram {
+                            buckets: lhs_buckets,
+                            sum: lhs_sum,
+                            count: lhs_count,
+                        },
+                    ) => {
+                        for rhs in rhs_buckets {
+                            for lhs in lhs_buckets {
+                                let res = rhs.1 - lhs.1;
+                                *rhs = (rhs.0, res);
+                            }
+                        }
+                        *rhs_sum -= *lhs_sum;
+                        *rhs_count -= *lhs_count;
+                    }
+                    (_, _) => {
+                        trace!("unexpected metrics comparison");
+                    }
+                }
+            }
+            delta
+        }
+        None => t2.clone(),
     }
 }
 
