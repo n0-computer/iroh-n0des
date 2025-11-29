@@ -289,7 +289,7 @@ impl Client {
     }
 
     #[cfg(feature = "signals")]
-    pub async fn create_signal(&self, ttl: u32, name: String, value: Vec<u8>) -> Result<(), Error> {
+    pub async fn create_signal(&self, ttl: u64, name: String, value: Vec<u8>) -> Result<(), Error> {
         let (tx, rx) = oneshot::channel();
         self.message_channel
             .send(ClientActorMessage::CreateSignal {
@@ -327,7 +327,7 @@ enum ClientActorMessage {
     },
     #[cfg(feature = "signals")]
     CreateSignal {
-        ttl: u32,
+        ttl: u64,
         name: String,
         value: Vec<u8>,
         done: oneshot::Sender<Result<(), Error>>,
@@ -453,7 +453,7 @@ impl ClientActor {
     }
 
     #[cfg(feature = "signals")]
-    pub async fn signals_send(&self, ttl: u32, name: String, value: Vec<u8>) -> Result<(), Error> {
+    pub async fn signals_send(&self, ttl: u64, name: String, value: Vec<u8>) -> Result<(), Error> {
         self.client.rpc(CreateSignal { ttl, name, value }).await?;
         Ok(())
     }
