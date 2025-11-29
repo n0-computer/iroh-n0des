@@ -66,7 +66,7 @@ pub struct Pong {
 /// Signals are opaque data that n0des can ferry between endpoints
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateSignal {
-    pub ttl: u32,
+    pub ttl: u64,
     pub name: String,
     pub value: Vec<u8>,
 }
@@ -80,7 +80,7 @@ pub struct GetSignals {
 /// Signals are opaque data that n0des can ferry between endpoints
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Signal {
-    pub ttl: u32,
+    pub ttl: u64,
     pub name: String,
     pub value: Vec<u8>,
 }
