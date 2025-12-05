@@ -208,6 +208,7 @@ impl ClientBuilder {
                 client,
                 session_id: Uuid::new_v4(),
                 authorized: false,
+                interval_metrics_enabled: self.metrics_interval.is_some(),
             }
             .run(self.registry, self.metrics_interval, rx),
         ));
@@ -294,6 +295,22 @@ impl Client {
             .map_err(Error::Remote)
     }
 
+    /// Publish a [ticket] to n0des so others can find it by calling fetch_tickets.
+    /// Publishing uses n0des to act as a signaling server,e.
+    /// This API is intentionally designed around tickets to encourage using
+    /// more than one signaling mechanism, like QR codes, sharing action sheets,
+    /// copy-paste, etc. Publishing to n0des should give a smooth happy-path
+    /// experience when two nodes are online, while the ticket format will still
+    /// work if they can be shared by other means.
+    ///
+    /// A ticket will remain published as long as the endpoint that published
+    /// is online. Stale tickets be pruned within 4 metrics collection intervals
+    /// of an endpoint going offline.
+    ///
+    /// Tickets cannot be published if a metrics collection interval is disabled,
+    /// because n0des uses metrics publishing as a keepalive for ticket records
+    ///
+    /// [ticket]: https://docs.rs/iroh-tickets
     #[cfg(feature = "tickets")]
     pub async fn publish_ticket<T: Ticket>(&self, name: String, ticket: T) -> Result<(), Error> {
         let ticket_kind = T::KIND.to_string();
@@ -314,6 +331,7 @@ impl Client {
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
     }
 
+    /// List the known published tickets
     #[cfg(feature = "tickets")]
     pub async fn fetch_tickets<T: Ticket>(
         &self,
@@ -373,6 +391,7 @@ enum ClientActorMessage {
     },
 }
 
+/// PublishedTicket is the item type returned by n0des when listing tickets
 #[cfg(feature = "tickets")]
 #[derive(Debug)]
 pub struct PublishedTicket<T: Ticket> {
@@ -385,6 +404,7 @@ struct ClientActor {
     client: N0desClient,
     session_id: Uuid,
     authorized: bool,
+    interval_metrics_enabled: bool,
 }
 
 impl ClientActor {
@@ -507,6 +527,11 @@ impl ClientActor {
         ticket_kind: String,
         ticket_bytes: Vec<u8>,
     ) -> Result<(), Error> {
+        if !self.interval_metrics_enabled {
+            return Err(Error::Other(anyhow!(
+                "a metrics interval is required to publish tickets"
+            )));
+        }
         trace!("client actor tickets publish");
         self.auth().await?;
 
