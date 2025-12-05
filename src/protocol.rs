@@ -23,6 +23,8 @@ pub enum N0desProtocol {
 
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     TicketPublish(PublishTicket),
+    #[rpc(tx=oneshot::Sender<RemoteResult<bool>>)]
+    TicketUnpublish(UnpublishTicket),
     #[rpc(tx=oneshot::Sender<RemoteResult<Vec<TicketData>>>)]
     TicketList(ListTickets),
 }
@@ -72,6 +74,11 @@ pub struct PublishTicket;
 // dummy type to make irpc happy
 #[cfg(not(feature = "tickets"))]
 #[derive(Debug, Serialize, Deserialize)]
+pub struct UnpublishTicket;
+
+// dummy type to make irpc happy
+#[cfg(not(feature = "tickets"))]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ListTickets;
 
 // dummy type to make irpc happy
@@ -80,13 +87,22 @@ pub struct ListTickets;
 pub struct TicketData;
 
 /// Publishing a ticket allows n0des to act as a central hub to ferry tickets
-/// between endpoints
+/// between endpoints.
 #[cfg(feature = "tickets")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PublishTicket {
     pub name: String,
     pub ticket_kind: String,
     pub ticket: Vec<u8>,
+}
+
+/// wire-level request to remove a ticket. Useful for undos, and any situation
+/// where the uptime of the endpoint outlasts the utility of the ticket.
+#[cfg(feature = "tickets")]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UnpublishTicket {
+    pub name: String,
+    pub ticket_kind: String,
 }
 
 /// Wire format for requesting a list of tickets

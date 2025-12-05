@@ -18,9 +18,7 @@ use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 #[cfg(feature = "tickets")]
-use crate::protocol::TicketData;
-#[cfg(feature = "tickets")]
-use crate::protocol::{ListTickets, PublishTicket};
+use crate::protocol::{ListTickets, PublishTicket, TicketData, UnpublishTicket};
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
@@ -303,6 +301,9 @@ impl Client {
     /// experience when two nodes are online, while the ticket format will still
     /// work if they can be shared by other means.
     ///
+    /// Tickets are unique by {endpoint, name, type}. This means its possible to
+    /// have multiple tickets with the same name, but from different endpoints.
+    ///
     /// A ticket will remain published as long as the endpoint that published
     /// is online. Stale tickets be pruned within 4 metrics collection intervals
     /// of an endpoint going offline.
@@ -322,6 +323,27 @@ impl Client {
                 name,
                 ticket_kind,
                 ticket_bytes,
+                done: tx,
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow!("publishing ticket")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+    }
+
+    /// Remove a ticket from n0des that an endpoint has published. Ticket name
+    /// and type must match to work, returns true if a ticket was actually
+    /// removed.
+    #[cfg(feature = "tickets")]
+    pub async fn unpublish_ticket<T: Ticket>(&self, name: String) -> Result<bool, Error> {
+        let ticket_kind = T::KIND.to_string();
+        let (tx, rx) = oneshot::channel();
+
+        self.message_channel
+            .send(ClientActorMessage::UnpublishTicket {
+                name,
+                ticket_kind,
                 done: tx,
             })
             .await
@@ -381,6 +403,12 @@ enum ClientActorMessage {
         ticket_kind: String,
         ticket_bytes: Vec<u8>,
         done: oneshot::Sender<Result<(), Error>>,
+    },
+    #[cfg(feature = "tickets")]
+    UnpublishTicket {
+        name: String,
+        ticket_kind: String,
+        done: oneshot::Sender<Result<bool, Error>>,
     },
     #[cfg(feature = "tickets")]
     FetchTickets {
@@ -444,14 +472,21 @@ impl ClientActor {
                         ClientActorMessage::PublishTicket{ name, ticket_kind, ticket_bytes, done } => {
                             let res = self.tickets_publish(name, ticket_kind, ticket_bytes).await;
                             if let Err(err) = done.send(res) {
-                                warn!("failed to create signal: {:#?}", err);
+                                warn!("failed to publish ticket: {:#?}", err);
+                            }
+                        }
+                        #[cfg(feature = "tickets")]
+                        ClientActorMessage::UnpublishTicket{ name, ticket_kind, done } => {
+                            let res = self.tickets_unpublish(name, ticket_kind).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to unpublish ticket: {:#?}", err);
                             }
                         }
                         #[cfg(feature = "tickets")]
                         ClientActorMessage::FetchTickets{ done, ticket_kind, offset, limit } => {
                             let res = self.tickets_fetch(ticket_kind, offset, limit).await;
                             if let Err(err) = done.send(res) {
-                                warn!("failed to create signal: {:#?}", err);
+                                warn!("failed to fetch tickets: {:#?}", err);
                             }
                         }
                     }
@@ -544,6 +579,22 @@ impl ClientActor {
             })
             .await??;
         Ok(())
+    }
+
+    #[cfg(feature = "tickets")]
+    async fn tickets_unpublish(
+        &mut self,
+        name: String,
+        ticket_kind: String,
+    ) -> Result<bool, Error> {
+        trace!("client actor tickets unpublish");
+        self.auth().await?;
+
+        let res = self
+            .client
+            .rpc(UnpublishTicket { name, ticket_kind })
+            .await??;
+        Ok(res)
     }
 
     #[cfg(feature = "tickets")]
