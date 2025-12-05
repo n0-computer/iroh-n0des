@@ -24,7 +24,7 @@ impl Node {
             .build()
             .await?;
 
-        // a real example would wire up more protocols, like gossip
+        // a real example would wire up more protocols here
 
         Ok(Node {
             username: username.to_string(),
