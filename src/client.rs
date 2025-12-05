@@ -7,6 +7,8 @@ use std::{
 use anyhow::{Result, anyhow, ensure};
 use iroh::{Endpoint, EndpointAddr, EndpointId, endpoint::ConnectError};
 use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
+#[cfg(feature = "tickets")]
+use iroh_tickets::Ticket;
 use irpc_iroh::IrohLazyRemoteConnection;
 use n0_error::StackResultExt;
 use n0_future::{task::AbortOnDropHandle, time::Duration};
@@ -15,6 +17,8 @@ use tokio::sync::oneshot;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
+#[cfg(feature = "tickets")]
+use crate::protocol::{GetTicket, ListTickets, PublishTicket, TicketData, UnpublishTicket};
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
@@ -202,6 +206,7 @@ impl ClientBuilder {
                 client,
                 session_id: Uuid::new_v4(),
                 authorized: false,
+                interval_metrics_enabled: self.metrics_interval.is_some(),
             }
             .run(self.registry, self.metrics_interval, rx),
         ));
@@ -287,6 +292,137 @@ impl Client {
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
             .map_err(Error::Remote)
     }
+
+    /// Publish a [ticket] to n0des so others can find it by calling fetch_tickets.
+    /// Publishing uses n0des to act as a signaling server,e.
+    /// This API is intentionally designed around tickets to encourage using
+    /// more than one signaling mechanism, like QR codes, sharing action sheets,
+    /// copy-paste, etc. Publishing to n0des should give a smooth happy-path
+    /// experience when two nodes are online, while the ticket format will still
+    /// work if they can be shared by other means.
+    ///
+    /// Tickets are unique by {endpoint, name, type}. This means its possible to
+    /// have multiple tickets with the same name, but from different endpoints.
+    ///
+    /// A ticket will remain published as long as the endpoint that published
+    /// is online. Stale tickets be pruned within 4 metrics collection intervals
+    /// of an endpoint going offline.
+    ///
+    /// Tickets cannot be published if a metrics collection interval is disabled,
+    /// because n0des uses metrics publishing as a keepalive for ticket records
+    ///
+    /// [ticket]: https://docs.rs/iroh-tickets
+    #[cfg(feature = "tickets")]
+    pub async fn publish_ticket<T: Ticket>(&self, name: String, ticket: T) -> Result<(), Error> {
+        let ticket_kind = T::KIND.to_string();
+        let ticket_bytes = ticket.to_bytes();
+        let (tx, rx) = oneshot::channel();
+
+        self.message_channel
+            .send(ClientActorMessage::PublishTicket {
+                name,
+                ticket_kind,
+                ticket_bytes,
+                done: tx,
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow!("publishing ticket")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+    }
+
+    /// Remove a ticket from n0des that an endpoint has published. Ticket name
+    /// and type must match to work, returns true if a ticket was actually
+    /// removed.
+    #[cfg(feature = "tickets")]
+    pub async fn unpublish_ticket<T: Ticket>(&self, name: String) -> Result<bool, Error> {
+        let ticket_kind = T::KIND.to_string();
+        let (tx, rx) = oneshot::channel();
+
+        self.message_channel
+            .send(ClientActorMessage::UnpublishTicket {
+                name,
+                ticket_kind,
+                done: tx,
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow!("publishing ticket")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+    }
+
+    /// Get a ticket from n0des by name.
+    #[cfg(feature = "tickets")]
+    pub async fn fetch_ticket<T: Ticket>(
+        &self,
+        name: String,
+    ) -> Result<Option<PublishedTicket<T>>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::FetchTicket {
+                name,
+                ticket_kind: T::KIND.to_string(),
+                done: tx,
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow!("fetching ticket")))?;
+
+        let res = rx
+            .await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))??;
+
+        match res {
+            Some(td) => {
+                let ticket = T::from_bytes(&td.ticket_bytes).map_err(|e| {
+                    Error::Other(anyhow!("parsing n0des ticket get response: {:?}", e))
+                })?;
+
+                Ok(Some(PublishedTicket {
+                    name: td.name,
+                    ticket,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// List tickets published to n0des.
+    #[cfg(feature = "tickets")]
+    pub async fn fetch_tickets<T: Ticket>(
+        &self,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<PublishedTicket<T>>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::FetchTickets {
+                offset,
+                limit,
+                ticket_kind: T::KIND.to_string(),
+                done: tx,
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow!("fetching tickets")))?;
+
+        let tickets = rx
+            .await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))??
+            .iter()
+            .map(|td| {
+                let ticket = T::from_bytes(&td.ticket_bytes).map_err(|e| {
+                    Error::Other(anyhow!("parsing n0des tickets list response: {:?}", e))
+                })?;
+                Ok::<PublishedTicket<T>, Error>(PublishedTicket {
+                    name: td.name.clone(),
+                    ticket,
+                })
+            })
+            .collect::<Result<Vec<PublishedTicket<T>>, _>>()?;
+
+        Ok(tickets)
+    }
 }
 
 enum ClientActorMessage {
@@ -296,6 +432,40 @@ enum ClientActorMessage {
     Ping {
         done: oneshot::Sender<Result<Pong, RemoteError>>,
     },
+    #[cfg(feature = "tickets")]
+    PublishTicket {
+        name: String,
+        ticket_kind: String,
+        ticket_bytes: Vec<u8>,
+        done: oneshot::Sender<Result<(), Error>>,
+    },
+    #[cfg(feature = "tickets")]
+    UnpublishTicket {
+        name: String,
+        ticket_kind: String,
+        done: oneshot::Sender<Result<bool, Error>>,
+    },
+    #[cfg(feature = "tickets")]
+    FetchTicket {
+        name: String,
+        ticket_kind: String,
+        done: oneshot::Sender<Result<Option<TicketData>, Error>>,
+    },
+    #[cfg(feature = "tickets")]
+    FetchTickets {
+        offset: u32,
+        limit: u32,
+        ticket_kind: String,
+        done: oneshot::Sender<Result<Vec<TicketData>, Error>>,
+    },
+}
+
+/// PublishedTicket is the item type returned by n0des when listing tickets
+#[cfg(feature = "tickets")]
+#[derive(Debug)]
+pub struct PublishedTicket<T: Ticket> {
+    pub name: String,
+    pub ticket: T,
 }
 
 struct ClientActor {
@@ -303,6 +473,8 @@ struct ClientActor {
     client: N0desClient,
     session_id: Uuid,
     authorized: bool,
+    #[allow(dead_code)]
+    interval_metrics_enabled: bool,
 }
 
 impl ClientActor {
@@ -335,6 +507,34 @@ impl ClientActor {
                             if let Err(err) = done.send(res) {
                                 debug!("failed to push metrics: {:#?}", err);
                                 self.authorized = false;
+                            }
+                        }
+                        #[cfg(feature = "tickets")]
+                        ClientActorMessage::PublishTicket{ name, ticket_kind, ticket_bytes, done } => {
+                            let res = self.tickets_publish(name, ticket_kind, ticket_bytes).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to publish ticket: {:#?}", err);
+                            }
+                        }
+                        #[cfg(feature = "tickets")]
+                        ClientActorMessage::UnpublishTicket{ name, ticket_kind, done } => {
+                            let res = self.tickets_unpublish(name, ticket_kind).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to unpublish ticket: {:#?}", err);
+                            }
+                        }
+                        #[cfg(feature = "tickets")]
+                        ClientActorMessage::FetchTicket{ name, ticket_kind, done } => {
+                            let res = self.ticket_fetch(name, ticket_kind).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to fetch tickets: {:#?}", err);
+                            }
+                        }
+                        #[cfg(feature = "tickets")]
+                        ClientActorMessage::FetchTickets{ done, ticket_kind, offset, limit } => {
+                            let res = self.tickets_fetch(ticket_kind, offset, limit).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to fetch tickets: {:#?}", err);
                             }
                         }
                     }
@@ -379,7 +579,7 @@ impl ClientActor {
 
         let req = rand::random();
         self.client
-            .rpc(Ping { req })
+            .rpc(Ping { req_id: req })
             .await
             .inspect_err(|e| warn!("rpc ping error: {e}"))
             .map_err(|_| RemoteError::InternalServerError)
@@ -402,6 +602,98 @@ impl ClientActor {
             .map_err(|_| RemoteError::InternalServerError)??;
 
         Ok(())
+    }
+
+    #[cfg(feature = "tickets")]
+    async fn tickets_publish(
+        &mut self,
+        name: String,
+        ticket_kind: String,
+        ticket_bytes: Vec<u8>,
+    ) -> Result<(), Error> {
+        if !self.interval_metrics_enabled {
+            return Err(Error::Other(anyhow!(
+                "a metrics interval is required to publish tickets"
+            )));
+        }
+        trace!("client actor tickets publish");
+        self.auth().await?;
+
+        let req_id = rand::random();
+        self.client
+            .rpc(PublishTicket {
+                req_id,
+                name,
+                ticket_kind,
+                ticket: ticket_bytes,
+            })
+            .await??;
+        Ok(())
+    }
+
+    #[cfg(feature = "tickets")]
+    async fn tickets_unpublish(
+        &mut self,
+        name: String,
+        ticket_kind: String,
+    ) -> Result<bool, Error> {
+        trace!("client actor tickets unpublish");
+        self.auth().await?;
+
+        let req_id = rand::random();
+        let res = self
+            .client
+            .rpc(UnpublishTicket {
+                req_id,
+                name,
+                ticket_kind,
+            })
+            .await??;
+        Ok(res)
+    }
+
+    #[cfg(feature = "tickets")]
+    async fn ticket_fetch(
+        &mut self,
+        name: String,
+        ticket_kind: String,
+    ) -> Result<Option<TicketData>, Error> {
+        trace!("client actor tickets fetch");
+        self.auth().await?;
+
+        let req_id = rand::random();
+        let tickets = self
+            .client
+            .rpc(GetTicket {
+                req_id,
+                name,
+                ticket_kind,
+            })
+            .await??;
+        Ok(tickets)
+    }
+
+    #[cfg(feature = "tickets")]
+    async fn tickets_fetch(
+        &mut self,
+        ticket_kind: String,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<TicketData>, Error> {
+        trace!("client actor tickets fetch");
+        self.auth().await?;
+
+        let req_id = rand::random();
+        let tickets = self
+            .client
+            .rpc(ListTickets {
+                req_id,
+                ticket_kind,
+                offset,
+                limit,
+            })
+            .await??;
+        Ok(tickets)
     }
 }
 

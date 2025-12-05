@@ -79,6 +79,8 @@ pub enum Cap {
     Relay(RelayCap),
     #[strum(to_string = "metrics:{0}")]
     Metrics(MetricsCap),
+    #[strum(to_string = "tickets:{0}")]
+    Tickets(TicketsCap),
 }
 
 impl FromStr for Cap {
@@ -91,6 +93,7 @@ impl FromStr for Cap {
             Ok(match domain {
                 "metrics" => Self::Metrics(MetricsCap::from_str(inner)?),
                 "relay" => Self::Relay(RelayCap::from_str(inner)?),
+                "tickets" => Self::Tickets(TicketsCap::from_str(inner)?),
                 _ => bail!("invalid cap domain"),
             })
         } else {
@@ -108,6 +111,14 @@ cap_enum!(
 cap_enum!(
     pub enum RelayCap {
         Use,
+    }
+);
+
+cap_enum!(
+    pub enum TicketsCap {
+        PutAny,
+        GetAny,
+        ListAny,
     }
 );
 
@@ -168,6 +179,7 @@ impl Capability for Cap {
             (Cap::Client, other) => client_capabilities(other),
             (Cap::Relay(slf), Cap::Relay(other)) => slf.permits(other),
             (Cap::Metrics(slf), Cap::Metrics(other)) => slf.permits(other),
+            (Cap::Tickets(slf), Cap::Tickets(other)) => slf.permits(other),
             (_, _) => false,
         }
     }
@@ -179,6 +191,7 @@ fn client_capabilities(other: &Cap) -> bool {
         Cap::Client => true,
         Cap::Relay(RelayCap::Use) => true,
         Cap::Metrics(MetricsCap::PutAny) => true,
+        Cap::Tickets(_) => true,
     }
 }
 
@@ -194,6 +207,17 @@ impl Capability for RelayCap {
     fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (RelayCap::Use, RelayCap::Use) => true,
+        }
+    }
+}
+
+impl Capability for TicketsCap {
+    fn permits(&self, other: &Self) -> bool {
+        match (self, other) {
+            (TicketsCap::PutAny, TicketsCap::PutAny) => true,
+            (TicketsCap::GetAny, TicketsCap::GetAny) => true,
+            (TicketsCap::ListAny, TicketsCap::ListAny) => true,
+            (_, _) => false,
         }
     }
 }
