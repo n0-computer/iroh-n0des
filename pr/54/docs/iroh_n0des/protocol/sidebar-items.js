@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["ALPN"],"enum":["N0desMessage","N0desProtocol","RemoteError"],"struct":["Auth","ListTickets","Ping","Pong","PublishTicket","PutMetrics","TicketData"],"type":["N0desClient","RemoteResult"]};
+window.SIDEBAR_ITEMS = {"constant":["ALPN"],"enum":["N0desMessage","N0desProtocol","RemoteError"],"struct":["Auth","ListTickets","Ping","Pong","PublishTicket","PutMetrics","TicketData","UnpublishTicket"],"type":["N0desClient","RemoteResult"]};
