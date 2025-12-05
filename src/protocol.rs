@@ -21,10 +21,8 @@ pub enum N0desProtocol {
     #[rpc(tx=oneshot::Sender<Pong>)]
     Ping(Ping),
 
-    #[cfg(feature = "tickets")]
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     TicketPublish(PublishTicket),
-    #[cfg(feature = "tickets")]
     #[rpc(tx=oneshot::Sender<RemoteResult<Vec<TicketData>>>)]
     TicketList(ListTickets),
 }
@@ -66,8 +64,24 @@ pub struct Pong {
     pub req_id: [u8; 16],
 }
 
-/// Publishing a ticket allows n0des to act as a signaling mechanism, serving as a
-/// central hub to ferry tickets between endpoints
+// dummy type to make irpc happy
+#[cfg(not(feature = "tickets"))]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PublishTicket;
+
+// dummy type to make irpc happy
+#[cfg(not(feature = "tickets"))]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListTickets;
+
+// dummy type to make irpc happy
+#[cfg(not(feature = "tickets"))]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TicketData;
+
+/// Publishing a ticket allows n0des to act as a central hub to ferry tickets
+/// between endpoints
+#[cfg(feature = "tickets")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PublishTicket {
     pub name: String,
@@ -75,7 +89,8 @@ pub struct PublishTicket {
     pub ticket: Vec<u8>,
 }
 
-/// Simple ping response
+/// Wire format for requesting a list of tickets
+#[cfg(feature = "tickets")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ListTickets {
     pub req_id: [u8; 16],

@@ -19,12 +19,12 @@ use uuid::Uuid;
 
 #[cfg(feature = "tickets")]
 use crate::protocol::TicketData;
+#[cfg(feature = "tickets")]
+use crate::protocol::{ListTickets, PublishTicket};
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
-    protocol::{
-        ALPN, Auth, ListTickets, N0desClient, Ping, Pong, PublishTicket, PutMetrics, RemoteError,
-    },
+    protocol::{ALPN, Auth, N0desClient, Ping, Pong, PutMetrics, RemoteError},
 };
 
 /// Client is the main handle for interacting with n0des. It communicates with
@@ -404,6 +404,7 @@ struct ClientActor {
     client: N0desClient,
     session_id: Uuid,
     authorized: bool,
+    #[allow(dead_code)]
     interval_metrics_enabled: bool,
 }
 

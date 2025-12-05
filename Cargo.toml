@@ -68,3 +68,7 @@ simulation = [
  "dep:time",
  "dep:tokio-util"
 ]
+
+[[example]]
+name = "tickets"
+required-features = ["tickets"]
