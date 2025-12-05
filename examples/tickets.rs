@@ -112,5 +112,16 @@ async fn main() -> anyhow::Result<()> {
         "bob listed tickets and the first one is named: {}",
         bobs_topics[0].name
     );
+
+    println!("alice is going offline now...");
+    alice.endpoint.close().await;
+
+    // we need to wait a bit to let the ticket expire
+    tokio::time::sleep(tokio::time::Duration::from_secs(21)).await;
+
+    let bobs_topics = bob.list_topics().await?;
+    assert_eq!(bobs_topics.len(), 0);
+    println!("bob listing tickets is now empty because alice is offline");
+
     Ok(())
 }
