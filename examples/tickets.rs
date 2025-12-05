@@ -80,10 +80,12 @@ impl Ticket for TopicTicket {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let alice = Node::new("alice").await?;
-    let _ticket = alice.publish_topic("cool_pokemon").await?;
+    let ticket = alice.publish_topic("cool_pokemon").await?;
+    println!("alice published a ticket: {:?}", ticket);
 
     let bob = Node::new("bob").await?;
-    let bobs_rooms = bob.list_topics().await?;
-    assert_eq!(bobs_rooms.len(), 1);
+    let bobs_topics = bob.list_topics().await?;
+    assert_eq!(bobs_topics.len(), 1);
+    println!("bob has seen ont ticket: {:?}", bobs_topics);
     Ok(())
 }

@@ -374,6 +374,7 @@ enum ClientActorMessage {
 }
 
 #[cfg(feature = "tickets")]
+#[derive(Debug)]
 pub struct PublishedTicket<T: Ticket> {
     pub name: String,
     pub ticket: T,
@@ -501,11 +502,14 @@ impl ClientActor {
 
     #[cfg(feature = "tickets")]
     async fn tickets_publish(
-        &self,
+        &mut self,
         name: String,
         ticket_kind: String,
         ticket_bytes: Vec<u8>,
     ) -> Result<(), Error> {
+        trace!("client actor tickets publish");
+        self.auth().await?;
+
         self.client
             .rpc(PublishTicket {
                 name,
@@ -518,11 +522,14 @@ impl ClientActor {
 
     #[cfg(feature = "tickets")]
     async fn tickets_fetch(
-        &self,
+        &mut self,
         ticket_kind: String,
         offset: u32,
         limit: u32,
     ) -> Result<Vec<TicketData>, Error> {
+        trace!("client actor tickets fetch");
+        self.auth().await?;
+
         let req_id = rand::random();
         let tickets = self
             .client
