@@ -20,10 +20,13 @@ pub enum N0desProtocol {
     PutMetrics(PutMetrics),
     #[rpc(tx=oneshot::Sender<Pong>)]
     Ping(Ping),
+
+    #[cfg(feature = "tickets")]
     #[rpc(tx=oneshot::Sender<()>)]
-    CreateSignal(CreateSignal),
-    #[rpc(tx=oneshot::Sender<Vec<Signal>>)]
-    GetSignals(GetSignals),
+    TicketPublish(PublishTicket),
+    #[cfg(feature = "tickets")]
+    #[rpc(tx=oneshot::Sender<Vec<TicketData>>)]
+    TicketList(ListTickets),
 }
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
@@ -54,43 +57,49 @@ pub struct PutMetrics {
 /// Simple ping requests
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Ping {
-    pub req: [u8; 16],
+    pub req_id: [u8; 16],
 }
 
 /// Simple ping response
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Pong {
-    pub req: [u8; 16],
+    pub req_id: [u8; 16],
 }
 
-/// Signals are opaque data that n0des can ferry between endpoints
+/// Publishing a ticket allows n0des to act as a signaling mechanism, serving as a
+/// central hub to ferry tickets between endpoints
 #[derive(Debug, Serialize, Deserialize)]
-pub struct CreateSignal {
-    pub ttl: u64,
+pub struct PublishTicket {
     pub name: String,
-    pub value: Vec<u8>,
+    pub ticket_kind: String,
+    pub ticket: Vec<u8>,
 }
 
 /// Simple ping response
 #[derive(Debug, Serialize, Deserialize)]
-pub struct GetSignals {
-    pub req: [u8; 32],
+pub struct ListTickets {
+    pub req_id: [u8; 16],
+    pub ticket_kind: String,
+    pub offset: u32,
+    pub limit: u32,
 }
 
 /// Signals are opaque data that n0des can ferry between endpoints
+#[cfg(feature = "tickets")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Signal {
-    pub ttl: u64,
+pub struct TicketData {
     pub name: String,
-    pub value: Vec<u8>,
+    pub ticket_kind: String,
+    pub ticket_bytes: Vec<u8>,
 }
 
-impl From<CreateSignal> for Signal {
-    fn from(msg: CreateSignal) -> Self {
-        Signal {
-            ttl: msg.ttl,
+#[cfg(feature = "tickets")]
+impl From<PublishTicket> for TicketData {
+    fn from(msg: PublishTicket) -> Self {
+        TicketData {
             name: msg.name,
-            value: msg.value,
+            ticket_kind: msg.ticket_kind,
+            ticket_bytes: msg.ticket,
         }
     }
 }

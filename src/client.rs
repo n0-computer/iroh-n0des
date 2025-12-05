@@ -7,6 +7,8 @@ use std::{
 use anyhow::{Result, anyhow, ensure};
 use iroh::{Endpoint, EndpointAddr, EndpointId, endpoint::ConnectError};
 use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
+#[cfg(feature = "tickets")]
+use iroh_tickets::Ticket;
 use irpc_iroh::IrohLazyRemoteConnection;
 use n0_error::StackResultExt;
 use n0_future::{task::AbortOnDropHandle, time::Duration};
@@ -15,12 +17,13 @@ use tokio::sync::oneshot;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
+#[cfg(feature = "tickets")]
+use crate::protocol::TicketData;
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
     protocol::{
-        ALPN, Auth, CreateSignal, GetSignals, N0desClient, Ping, Pong, PutMetrics, RemoteError,
-        Signal,
+        ALPN, Auth, ListTickets, N0desClient, Ping, Pong, PublishTicket, PutMetrics, RemoteError,
     },
 };
 
@@ -291,33 +294,59 @@ impl Client {
             .map_err(Error::Remote)
     }
 
-    #[cfg(feature = "signals")]
-    pub async fn create_signal(&self, ttl: u64, name: String, value: Vec<u8>) -> Result<(), Error> {
+    #[cfg(feature = "tickets")]
+    pub async fn publish_ticket<T: Ticket>(&self, name: String, ticket: T) -> Result<(), Error> {
+        let ticket_kind = T::KIND.to_string();
+        let ticket_bytes = ticket.to_bytes();
         let (tx, rx) = oneshot::channel();
+
         self.message_channel
-            .send(ClientActorMessage::CreateSignal {
-                ttl,
+            .send(ClientActorMessage::PublishTicket {
                 name,
-                value,
+                ticket_kind,
+                ticket_bytes,
                 done: tx,
             })
             .await
-            .map_err(|_| Error::Other(anyhow!("sending metrics")))?;
+            .map_err(|_| Error::Other(anyhow!("publishing ticket")))?;
 
         rx.await
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
     }
 
-    #[cfg(feature = "signals")]
-    pub async fn list_signals(&self) -> Result<Vec<Signal>, Error> {
+    #[cfg(feature = "tickets")]
+    pub async fn fetch_tickets<T: Ticket>(
+        &self,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<PublishedTicket<T>>, Error> {
         let (tx, rx) = oneshot::channel();
         self.message_channel
-            .send(ClientActorMessage::FetchSignals { done: tx })
+            .send(ClientActorMessage::FetchTickets {
+                offset,
+                limit,
+                ticket_kind: T::KIND.to_string(),
+                done: tx,
+            })
             .await
-            .map_err(|_| Error::Other(anyhow!("sending metrics")))?;
+            .map_err(|_| Error::Other(anyhow!("fetching tickets")))?;
 
-        rx.await
-            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+        let tickets = rx
+            .await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))??
+            .iter()
+            .map(|td| {
+                let ticket = T::from_bytes(&td.ticket_bytes).map_err(|e| {
+                    Error::Other(anyhow!("parsing n0des tickets list response: {:?}", e))
+                })?;
+                Ok::<PublishedTicket<T>, Error>(PublishedTicket {
+                    name: td.name.clone(),
+                    ticket,
+                })
+            })
+            .collect::<Result<Vec<PublishedTicket<T>>, _>>()?;
+
+        Ok(tickets)
     }
 }
 
@@ -328,17 +357,26 @@ enum ClientActorMessage {
     Ping {
         done: oneshot::Sender<Result<Pong, RemoteError>>,
     },
-    #[cfg(feature = "signals")]
-    CreateSignal {
-        ttl: u64,
+    #[cfg(feature = "tickets")]
+    PublishTicket {
         name: String,
-        value: Vec<u8>,
+        ticket_kind: String,
+        ticket_bytes: Vec<u8>,
         done: oneshot::Sender<Result<(), Error>>,
     },
-    #[cfg(feature = "signals")]
-    FetchSignals {
-        done: oneshot::Sender<Result<Vec<Signal>, Error>>,
+    #[cfg(feature = "tickets")]
+    FetchTickets {
+        offset: u32,
+        limit: u32,
+        ticket_kind: String,
+        done: oneshot::Sender<Result<Vec<TicketData>, Error>>,
     },
+}
+
+#[cfg(feature = "tickets")]
+pub struct PublishedTicket<T: Ticket> {
+    pub name: String,
+    pub ticket: T,
 }
 
 struct ClientActor {
@@ -380,16 +418,16 @@ impl ClientActor {
                                 self.authorized = false;
                             }
                         }
-                        #[cfg(feature = "signals")]
-                        ClientActorMessage::CreateSignal{ ttl, name, value, done } => {
-                            let res = self.signals_send(ttl, name, value).await;
+                        #[cfg(feature = "tickets")]
+                        ClientActorMessage::PublishTicket{ name, ticket_kind, ticket_bytes, done } => {
+                            let res = self.tickets_publish(name, ticket_kind, ticket_bytes).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to create signal: {:#?}", err);
                             }
                         }
-                        #[cfg(feature = "signals")]
-                        ClientActorMessage::FetchSignals{ done } => {
-                            let res = self.signals_fetch().await;
+                        #[cfg(feature = "tickets")]
+                        ClientActorMessage::FetchTickets{ done, ticket_kind, offset, limit } => {
+                            let res = self.tickets_fetch(ticket_kind, offset, limit).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to create signal: {:#?}", err);
                             }
@@ -436,7 +474,7 @@ impl ClientActor {
 
         let req = rand::random();
         self.client
-            .rpc(Ping { req })
+            .rpc(Ping { req_id: req })
             .await
             .inspect_err(|e| warn!("rpc ping error: {e}"))
             .map_err(|_| RemoteError::InternalServerError)
@@ -461,17 +499,40 @@ impl ClientActor {
         Ok(())
     }
 
-    #[cfg(feature = "signals")]
-    pub async fn signals_send(&self, ttl: u64, name: String, value: Vec<u8>) -> Result<(), Error> {
-        self.client.rpc(CreateSignal { ttl, name, value }).await?;
+    #[cfg(feature = "tickets")]
+    async fn tickets_publish(
+        &self,
+        name: String,
+        ticket_kind: String,
+        ticket_bytes: Vec<u8>,
+    ) -> Result<(), Error> {
+        self.client
+            .rpc(PublishTicket {
+                name,
+                ticket_kind,
+                ticket: ticket_bytes,
+            })
+            .await?;
         Ok(())
     }
 
-    #[cfg(feature = "signals")]
-    pub async fn signals_fetch(&self) -> Result<Vec<Signal>, Error> {
-        // TODO: real IDs for requests
-        let id = [0u8; 32];
-        let signals = self.client.rpc(GetSignals { req: id }).await?;
+    #[cfg(feature = "tickets")]
+    async fn tickets_fetch(
+        &self,
+        ticket_kind: String,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<TicketData>, Error> {
+        let req_id = rand::random();
+        let signals = self
+            .client
+            .rpc(ListTickets {
+                req_id,
+                ticket_kind,
+                offset,
+                limit,
+            })
+            .await?;
         Ok(signals)
     }
 }

@@ -51,6 +51,9 @@ pub use self::{
     protocol::ALPN,
 };
 
+#[cfg(feature = "tickets")]
+pub use self::client::PublishedTicket;
+
 #[cfg(test)]
 mod tests {
     // keep to make sure that there is a test even with all features disabled.
