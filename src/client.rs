@@ -512,7 +512,7 @@ impl ClientActor {
                 ticket_kind,
                 ticket: ticket_bytes,
             })
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -524,7 +524,7 @@ impl ClientActor {
         limit: u32,
     ) -> Result<Vec<TicketData>, Error> {
         let req_id = rand::random();
-        let signals = self
+        let tickets = self
             .client
             .rpc(ListTickets {
                 req_id,
@@ -532,8 +532,8 @@ impl ClientActor {
                 offset,
                 limit,
             })
-            .await?;
-        Ok(signals)
+            .await??;
+        Ok(tickets)
     }
 }
 

@@ -22,10 +22,10 @@ pub enum N0desProtocol {
     Ping(Ping),
 
     #[cfg(feature = "tickets")]
-    #[rpc(tx=oneshot::Sender<()>)]
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     TicketPublish(PublishTicket),
     #[cfg(feature = "tickets")]
-    #[rpc(tx=oneshot::Sender<Vec<TicketData>>)]
+    #[rpc(tx=oneshot::Sender<RemoteResult<Vec<TicketData>>>)]
     TicketList(ListTickets),
 }
 
