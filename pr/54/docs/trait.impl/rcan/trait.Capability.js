@@ -1,9 +1,9 @@
 (function() {
-    var implementors = Object.fromEntries([["iroh_n0des",[["impl Capability for <a class=\"enum\" href=\"iroh_n0des/caps/enum.Cap.html\" title=\"enum iroh_n0des::caps::Cap\">Cap</a>"],["impl Capability for <a class=\"enum\" href=\"iroh_n0des/caps/enum.Caps.html\" title=\"enum iroh_n0des::caps::Caps\">Caps</a>"],["impl Capability for <a class=\"enum\" href=\"iroh_n0des/caps/enum.MetricsCap.html\" title=\"enum iroh_n0des::caps::MetricsCap\">MetricsCap</a>"],["impl Capability for <a class=\"enum\" href=\"iroh_n0des/caps/enum.RelayCap.html\" title=\"enum iroh_n0des::caps::RelayCap\">RelayCap</a>"],["impl&lt;C: Capability + <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/cmp/trait.Ord.html\" title=\"trait core::cmp::Ord\">Ord</a>&gt; Capability for <a class=\"struct\" href=\"iroh_n0des/caps/struct.CapSet.html\" title=\"struct iroh_n0des::caps::CapSet\">CapSet</a>&lt;C&gt;"]]]]);
+    var implementors = Object.fromEntries([["iroh_n0des",[["impl Capability for <a class=\"enum\" href=\"iroh_n0des/caps/enum.Cap.html\" title=\"enum iroh_n0des::caps::Cap\">Cap</a>"],["impl Capability for <a class=\"enum\" href=\"iroh_n0des/caps/enum.Caps.html\" title=\"enum iroh_n0des::caps::Caps\">Caps</a>"],["impl Capability for <a class=\"enum\" href=\"iroh_n0des/caps/enum.MetricsCap.html\" title=\"enum iroh_n0des::caps::MetricsCap\">MetricsCap</a>"],["impl Capability for <a class=\"enum\" href=\"iroh_n0des/caps/enum.RelayCap.html\" title=\"enum iroh_n0des::caps::RelayCap\">RelayCap</a>"],["impl Capability for <a class=\"enum\" href=\"iroh_n0des/caps/enum.TicketsCap.html\" title=\"enum iroh_n0des::caps::TicketsCap\">TicketsCap</a>"],["impl&lt;C: Capability + <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/cmp/trait.Ord.html\" title=\"trait core::cmp::Ord\">Ord</a>&gt; Capability for <a class=\"struct\" href=\"iroh_n0des/caps/struct.CapSet.html\" title=\"struct iroh_n0des::caps::CapSet\">CapSet</a>&lt;C&gt;"]]]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {
         window.pending_implementors = implementors;
     }
 })()
-//{"start":57,"fragment_lengths":[857]}
+//{"start":57,"fragment_lengths":[1004]}
