@@ -51,6 +51,18 @@ impl Node {
         Ok(ticket)
     }
 
+    /// Get a topic
+    async fn get_topic(
+        &self,
+        username: &str,
+        topic: &str,
+    ) -> anyhow::Result<Option<PublishedTicket<TopicTicket>>> {
+        self.n0des
+            .fetch_ticket(format!("{username}_{topic}"))
+            .await
+            .context("getting ticket")
+    }
+
     /// a method that uses n0des signals, and processes them into a structure
     /// that your app wants
     async fn list_topics(&self) -> Result<Vec<PublishedTicket<TopicTicket>>> {
@@ -87,8 +99,18 @@ async fn main() -> anyhow::Result<()> {
     println!("alice published a ticket: {:?}", ticket);
 
     let bob = Node::new("bob").await?;
+
+    let fetched_ticket = bob.get_topic("alice", "cool_pokemon").await?;
+    // this is just a demo. real programs handle errors!
+    let fetched_ticket = fetched_ticket.expect("ticket to exist");
+    assert_eq!(fetched_ticket.ticket.message, ticket.message);
+    println!("bob fetched a ticket named: {}", fetched_ticket.name);
+
     let bobs_topics = bob.list_topics().await?;
     assert_eq!(bobs_topics.len(), 1);
-    println!("bob sees a ticket named: {}", bobs_topics[0].name);
+    println!(
+        "bob listed tickets and the first one is named: {}",
+        bobs_topics[0].name
+    );
     Ok(())
 }
