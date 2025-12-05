@@ -40,6 +40,9 @@ impl Node {
             endpoint_id: self.endpoint.id(),
         };
 
+        // here we intentionally try to create globally unique names
+        // you might also use a UUID for the topic name, or some other
+        // info to help disambiguate the ticket namespace
         self.n0des
             .publish_ticket(format!("{}_{topic}", self.username), ticket.clone())
             .await
@@ -86,6 +89,6 @@ async fn main() -> anyhow::Result<()> {
     let bob = Node::new("bob").await?;
     let bobs_topics = bob.list_topics().await?;
     assert_eq!(bobs_topics.len(), 1);
-    println!("bob has seen ont ticket: {:?}", bobs_topics);
+    println!("bob sees a ticket named: {}", bobs_topics[0].name);
     Ok(())
 }
