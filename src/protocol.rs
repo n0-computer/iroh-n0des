@@ -25,6 +25,8 @@ pub enum N0desProtocol {
     TicketPublish(PublishTicket),
     #[rpc(tx=oneshot::Sender<RemoteResult<bool>>)]
     TicketUnpublish(UnpublishTicket),
+    #[rpc(tx=oneshot::Sender<RemoteResult<Option<TicketData>>>)]
+    TicketGet(GetTicket),
     #[rpc(tx=oneshot::Sender<RemoteResult<Vec<TicketData>>>)]
     TicketList(ListTickets),
 }
@@ -74,6 +76,11 @@ pub struct PublishTicket;
 // dummy type to make irpc happy
 #[cfg(not(feature = "tickets"))]
 #[derive(Debug, Serialize, Deserialize)]
+pub struct GetTicket;
+
+// dummy type to make irpc happy
+#[cfg(not(feature = "tickets"))]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UnpublishTicket;
 
 // dummy type to make irpc happy
@@ -91,6 +98,7 @@ pub struct TicketData;
 #[cfg(feature = "tickets")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PublishTicket {
+    pub req_id: [u8; 16],
     pub name: String,
     pub ticket_kind: String,
     pub ticket: Vec<u8>,
@@ -101,6 +109,16 @@ pub struct PublishTicket {
 #[cfg(feature = "tickets")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UnpublishTicket {
+    pub req_id: [u8; 16],
+    pub name: String,
+    pub ticket_kind: String,
+}
+
+/// wire-level request get a ticket by name.
+#[cfg(feature = "tickets")]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetTicket {
+    pub req_id: [u8; 16],
     pub name: String,
     pub ticket_kind: String,
 }

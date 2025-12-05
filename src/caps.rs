@@ -93,6 +93,7 @@ impl FromStr for Cap {
             Ok(match domain {
                 "metrics" => Self::Metrics(MetricsCap::from_str(inner)?),
                 "relay" => Self::Relay(RelayCap::from_str(inner)?),
+                "tickets" => Self::Tickets(TicketsCap::from_str(inner)?),
                 _ => bail!("invalid cap domain"),
             })
         } else {
@@ -116,6 +117,7 @@ cap_enum!(
 cap_enum!(
     pub enum TicketsCap {
         PutAny,
+        GetAny,
         ListAny,
     }
 );
@@ -213,6 +215,7 @@ impl Capability for TicketsCap {
     fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (TicketsCap::PutAny, TicketsCap::PutAny) => true,
+            (TicketsCap::GetAny, TicketsCap::GetAny) => true,
             (TicketsCap::ListAny, TicketsCap::ListAny) => true,
             (_, _) => false,
         }

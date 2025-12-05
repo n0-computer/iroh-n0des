@@ -18,7 +18,7 @@ use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 #[cfg(feature = "tickets")]
-use crate::protocol::{ListTickets, PublishTicket, TicketData, UnpublishTicket};
+use crate::protocol::{GetTicket, ListTickets, PublishTicket, TicketData, UnpublishTicket};
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
@@ -353,7 +353,42 @@ impl Client {
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
     }
 
-    /// List the known published tickets
+    /// Get a ticket from n0des by name.
+    #[cfg(feature = "tickets")]
+    pub async fn fetch_ticket<T: Ticket>(
+        &self,
+        name: String,
+    ) -> Result<Option<PublishedTicket<T>>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::FetchTicket {
+                name,
+                ticket_kind: T::KIND.to_string(),
+                done: tx,
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow!("fetching ticket")))?;
+
+        let res = rx
+            .await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))??;
+
+        match res {
+            Some(td) => {
+                let ticket = T::from_bytes(&td.ticket_bytes).map_err(|e| {
+                    Error::Other(anyhow!("parsing n0des ticket get response: {:?}", e))
+                })?;
+
+                Ok(Some(PublishedTicket {
+                    name: td.name,
+                    ticket,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// List tickets published to n0des.
     #[cfg(feature = "tickets")]
     pub async fn fetch_tickets<T: Ticket>(
         &self,
@@ -409,6 +444,12 @@ enum ClientActorMessage {
         name: String,
         ticket_kind: String,
         done: oneshot::Sender<Result<bool, Error>>,
+    },
+    #[cfg(feature = "tickets")]
+    FetchTicket {
+        name: String,
+        ticket_kind: String,
+        done: oneshot::Sender<Result<Option<TicketData>, Error>>,
     },
     #[cfg(feature = "tickets")]
     FetchTickets {
@@ -480,6 +521,13 @@ impl ClientActor {
                             let res = self.tickets_unpublish(name, ticket_kind).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to unpublish ticket: {:#?}", err);
+                            }
+                        }
+                        #[cfg(feature = "tickets")]
+                        ClientActorMessage::FetchTicket{ name, ticket_kind, done } => {
+                            let res = self.ticket_fetch(name, ticket_kind).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to fetch tickets: {:#?}", err);
                             }
                         }
                         #[cfg(feature = "tickets")]
@@ -571,8 +619,10 @@ impl ClientActor {
         trace!("client actor tickets publish");
         self.auth().await?;
 
+        let req_id = rand::random();
         self.client
             .rpc(PublishTicket {
+                req_id,
                 name,
                 ticket_kind,
                 ticket: ticket_bytes,
@@ -590,11 +640,37 @@ impl ClientActor {
         trace!("client actor tickets unpublish");
         self.auth().await?;
 
+        let req_id = rand::random();
         let res = self
             .client
-            .rpc(UnpublishTicket { name, ticket_kind })
+            .rpc(UnpublishTicket {
+                req_id,
+                name,
+                ticket_kind,
+            })
             .await??;
         Ok(res)
+    }
+
+    #[cfg(feature = "tickets")]
+    async fn ticket_fetch(
+        &mut self,
+        name: String,
+        ticket_kind: String,
+    ) -> Result<Option<TicketData>, Error> {
+        trace!("client actor tickets fetch");
+        self.auth().await?;
+
+        let req_id = rand::random();
+        let tickets = self
+            .client
+            .rpc(GetTicket {
+                req_id,
+                name,
+                ticket_kind,
+            })
+            .await??;
+        Ok(tickets)
     }
 
     #[cfg(feature = "tickets")]
