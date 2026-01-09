@@ -1,3 +1,4 @@
+#[cfg(feature = "simulation")]
 mod tests {
     use std::sync::Arc;
 

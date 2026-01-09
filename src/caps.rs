@@ -1,11 +1,10 @@
-use std::{collections::BTreeSet, fmt, str::FromStr, time::Duration};
+use std::{collections::BTreeSet, fmt, str::FromStr};
 
 use anyhow::{Context, Result, bail};
-use ed25519_dalek::SigningKey;
-use iroh::EndpointId;
+use iroh::{EndpointId, SecretKey};
+use n0_future::time::Duration;
 use rcan::{Capability, Expires, Rcan};
 use serde::{Deserialize, Serialize};
-use ssh_key::PrivateKey as SshPrivateKey;
 
 macro_rules! cap_enum(
     ($enum:item) => {
@@ -49,6 +48,14 @@ impl std::ops::Deref for Caps {
     }
 }
 
+/// A capability is the capacity to do something. Capabilities are embedded
+/// within signed tokens that dictate who created them, and who they apply to.
+/// Caps follow the [object capability model], where possession of a valid
+/// capability token is the canonical source of authorization. This is different
+/// from an access control list approach where users authenticate, and their
+/// current set of capabilities are stored within a database.
+///
+/// [object capability model]: https://en.wikipedia.org/wiki/Object-capability_model
 #[derive(
     Debug,
     Eq,
@@ -66,10 +73,14 @@ impl std::ops::Deref for Caps {
 pub enum Cap {
     #[strum(to_string = "all")]
     All,
+    #[strum(to_string = "client")]
+    Client,
     #[strum(to_string = "relay:{0}")]
     Relay(RelayCap),
     #[strum(to_string = "metrics:{0}")]
     Metrics(MetricsCap),
+    #[strum(to_string = "tickets:{0}")]
+    Tickets(TicketsCap),
 }
 
 impl FromStr for Cap {
@@ -82,6 +93,7 @@ impl FromStr for Cap {
             Ok(match domain {
                 "metrics" => Self::Metrics(MetricsCap::from_str(inner)?),
                 "relay" => Self::Relay(RelayCap::from_str(inner)?),
+                "tickets" => Self::Tickets(TicketsCap::from_str(inner)?),
                 _ => bail!("invalid cap domain"),
             })
         } else {
@@ -102,11 +114,30 @@ cap_enum!(
     }
 );
 
+cap_enum!(
+    pub enum TicketsCap {
+        PutAny,
+        GetAny,
+        ListAny,
+    }
+);
+
 impl Caps {
     pub fn new(caps: impl IntoIterator<Item = impl Into<Cap>>) -> Self {
         Self::V0(CapSet::new(caps))
     }
 
+    /// the class of capabilities that n0des will accept when deriving from a
+    /// shared secret like an [ApiSecret]. These should be "client" capabilities:
+    /// typically for users of an app
+    ///
+    /// [ApiSecret]: crate::api_secret::ApiSecret
+    pub fn for_shared_secret() -> Self {
+        Self::new([Cap::Client])
+    }
+
+    /// The maximum set of capabilities. n0des will only accept these capabilities
+    /// when deriving from a secret that is registered with n0des, like an SSH key
     pub fn all() -> Self {
         Self::new([Cap::All])
     }
@@ -145,10 +176,22 @@ impl Capability for Cap {
     fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (Cap::All, _) => true,
+            (Cap::Client, other) => client_capabilities(other),
             (Cap::Relay(slf), Cap::Relay(other)) => slf.permits(other),
             (Cap::Metrics(slf), Cap::Metrics(other)) => slf.permits(other),
+            (Cap::Tickets(slf), Cap::Tickets(other)) => slf.permits(other),
             (_, _) => false,
         }
+    }
+}
+
+fn client_capabilities(other: &Cap) -> bool {
+    match other {
+        Cap::All => false,
+        Cap::Client => true,
+        Cap::Relay(RelayCap::Use) => true,
+        Cap::Metrics(MetricsCap::PutAny) => true,
+        Cap::Tickets(_) => true,
     }
 }
 
@@ -168,6 +211,18 @@ impl Capability for RelayCap {
     }
 }
 
+impl Capability for TicketsCap {
+    fn permits(&self, other: &Self) -> bool {
+        match (self, other) {
+            (TicketsCap::PutAny, TicketsCap::PutAny) => true,
+            (TicketsCap::GetAny, TicketsCap::GetAny) => true,
+            (TicketsCap::ListAny, TicketsCap::ListAny) => true,
+            (_, _) => false,
+        }
+    }
+}
+
+/// A set of capabilities
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
 pub struct CapSet<C: Capability + Ord>(BTreeSet<C>);
 
@@ -237,13 +292,14 @@ impl<C: Capability + Ord> Capability for CapSet<C> {
 }
 
 /// Create an rcan token for the api access.
-pub fn create_api_token(
-    user_ssh_key: &SshPrivateKey,
+#[cfg(feature = "ssh-key")]
+pub fn create_api_token_from_ssh_key(
+    user_ssh_key: &ssh_key::PrivateKey,
     local_id: EndpointId,
     max_age: Duration,
     capability: Caps,
 ) -> Result<Rcan<Caps>> {
-    let issuer: SigningKey = user_ssh_key
+    let issuer: ed25519_dalek::SigningKey = user_ssh_key
         .key_data()
         .ed25519()
         .context("only Ed25519 keys supported")?
@@ -251,6 +307,20 @@ pub fn create_api_token(
         .clone()
         .into();
 
+    let audience = local_id.as_verifying_key();
+    let can =
+        Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
+    Ok(can)
+}
+
+/// Create an rcan token for the api access from an iroh secret key
+pub fn create_api_token_from_secret_key(
+    private_key: SecretKey,
+    local_id: EndpointId,
+    max_age: Duration,
+    capability: Caps,
+) -> Result<Rcan<Caps>> {
+    let issuer = ed25519_dalek::SigningKey::from_bytes(&private_key.to_bytes());
     let audience = local_id.as_verifying_key();
     let can =
         Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
@@ -300,5 +370,17 @@ mod tests {
 
         assert!(!metrics.permits(&relay));
         assert!(!relay.permits(&metrics));
+    }
+
+    #[test]
+    fn client_caps() {
+        let client = Caps::new([Cap::Client]);
+
+        let all = Caps::new([Cap::All]);
+        let metrics = Caps::new([MetricsCap::PutAny]);
+        let relay = Caps::new([RelayCap::Use]);
+        assert!(client.permits(&metrics));
+        assert!(client.permits(&relay));
+        assert!(!client.permits(&all));
     }
 }
