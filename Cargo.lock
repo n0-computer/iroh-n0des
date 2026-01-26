@@ -1625,8 +1625,7 @@ dependencies = [
 [[package]]
 name = "iroh-quinn"
 version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77337b8686bf5d32aea4bb7e68cc5b73308fe3b9abdc972a26636ab3d3323437"
+source = "git+https://github.com/n0-computer/quinn?branch=main#aa6c3735cee6d3074d5421a97b5e48332de8e7b3"
 dependencies = [
  "bytes",
  "cfg_aliases",
@@ -1635,7 +1634,7 @@ dependencies = [
  "pin-project-lite",
  "rustc-hash",
  "rustls",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "thiserror 2.0.17",
  "tokio",
  "tokio-stream",
@@ -1646,8 +1645,7 @@ dependencies = [
 [[package]]
 name = "iroh-quinn-proto"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52a21324d427c0a9c992cc72753fc4512f36db62cacb4dbe7c3c98bc1fcd9ea2"
+source = "git+https://github.com/n0-computer/quinn?branch=main#aa6c3735cee6d3074d5421a97b5e48332de8e7b3"
 dependencies = [
  "bytes",
  "derive_more",
@@ -1672,14 +1670,13 @@ dependencies = [
 [[package]]
 name = "iroh-quinn-udp"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a91fe9ec3db6615d7ab1b303717f3b98fc40b96955a4ea25b113b1b879f7481f"
+source = "git+https://github.com/n0-computer/quinn?branch=main#aa6c3735cee6d3074d5421a97b5e48332de8e7b3"
 dependencies = [
  "cfg_aliases",
  "libc",
- "socket2 0.6.1",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1731,8 +1728,7 @@ dependencies = [
 [[package]]
 name = "iroh-tickets"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a322053cacddeca222f0999ce3cf6aa45c64ae5ad8c8911eac9b66008ffbaa5"
+source = "git+https://github.com/n0-computer/iroh-tickets?branch=feat-multipath#cd86453cec51ac7030e047421ad1ef60c272f825"
 dependencies = [
  "data-encoding",
  "derive_more",

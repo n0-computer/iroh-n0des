@@ -77,3 +77,7 @@ required-features = ["tickets"]
 iroh = { git = "https://github.com/n0-computer/iroh", branch = "release-0-96" }
 irpc = { git = "https://github.com/n0-computer/irpc", branch = "feat-multipath" }
 irpc-iroh = { git = "https://github.com/n0-computer/irpc", branch = "feat-multipath" }
+iroh-tickets = { git = "https://github.com/n0-computer/iroh-tickets", branch = "feat-multipath" }
+iroh-quinn = { git = "https://github.com/n0-computer/quinn", branch = "main" }
+iroh-quinn-udp = { git = "https://github.com/n0-computer/quinn", branch = "main" }
+iroh-quinn-proto = { git = "https://github.com/n0-computer/quinn", branch = "main" }
