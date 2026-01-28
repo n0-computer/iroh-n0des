@@ -30,7 +30,7 @@ struct Variant0EndpointAddr {
     addrs: BTreeSet<TransportAddr>,
 }
 
-/// Wire format for [`NodeTicket`].
+/// Wire format for [`Ticket`].
 #[derive(Serialize, Deserialize)]
 enum TicketWireFormat {
     Variant0(Variant0N0desTicket),
