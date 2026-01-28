@@ -1,0 +1,40 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `iroh-n0des-macro/src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-0bd2dfd4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="iroh_n0des_macro" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0-nightly (e96bb7e44 2026-01-27)" data-channel="nightly" data-search-js="search-86d08462.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-f9617a14.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-12f88f4f.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-ffcac47a.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">iroh_n0des_macro/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-2"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>proc_macro::TokenStream;
+<a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span>proc_macro2::Span;
+<a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>quote::quote;
+<a href=#4 id=4 data-nosnippet>4</a><span class="kw">use </span>syn::{Ident, ItemFn};
+<a href=#5 id=5 data-nosnippet>5</a>
+<a href=#6 id=6 data-nosnippet>6</a><span class="doccomment">/// Marks a function as a simulation test
+<a href=#7 id=7 data-nosnippet>7</a>///
+<a href=#8 id=8 data-nosnippet>8</a>/// This is a simple marker attribute that doesn't transform the code.
+<a href=#9 id=9 data-nosnippet>9</a>/// The external test runner discovers these functions by parsing the AST
+<a href=#10 id=10 data-nosnippet>10</a>/// and looking for this attribute.
+<a href=#11 id=11 data-nosnippet>11</a></span><span class="attr">#[proc_macro_attribute]
+<a href=#12 id=12 data-nosnippet>12</a></span><span class="kw">pub fn </span>sim(_args: TokenStream, input: TokenStream) -&gt; TokenStream {
+<a href=#13 id=13 data-nosnippet>13</a>    <span class="comment">// Parse and validate the function signature
+<a href=#14 id=14 data-nosnippet>14</a>    </span><span class="kw">let </span>input_fn = <span class="macro">syn::parse_macro_input!</span>(input <span class="kw">as </span>syn::ItemFn);
+<a href=#15 id=15 data-nosnippet>15</a>
+<a href=#16 id=16 data-nosnippet>16</a>    <span class="comment">// Validate it's async and returns Result&lt;SimulationBuilder&lt;_&gt;&gt;
+<a href=#17 id=17 data-nosnippet>17</a>    </span><span class="kw">if </span>input_fn.sig.asyncness.is_none() {
+<a href=#18 id=18 data-nosnippet>18</a>        <span class="kw">return </span>syn::Error::new_spanned(input_fn.sig.fn_token, <span class="string">"sim functions must be async"</span>)
+<a href=#19 id=19 data-nosnippet>19</a>            .to_compile_error()
+<a href=#20 id=20 data-nosnippet>20</a>            .into();
+<a href=#21 id=21 data-nosnippet>21</a>    }
+<a href=#22 id=22 data-nosnippet>22</a>
+<a href=#23 id=23 data-nosnippet>23</a>    expand_sim_fn(input_fn)
+<a href=#24 id=24 data-nosnippet>24</a>}
+<a href=#25 id=25 data-nosnippet>25</a>
+<a href=#26 id=26 data-nosnippet>26</a><span class="kw">fn </span>expand_sim_fn(input_fn: ItemFn) -&gt; TokenStream {
+<a href=#27 id=27 data-nosnippet>27</a>    <span class="kw">let </span>name = input_fn.sig.ident.clone();
+<a href=#28 id=28 data-nosnippet>28</a>    <span class="kw">let </span>name_str = name.to_string();
+<a href=#29 id=29 data-nosnippet>29</a>    <span class="kw">let </span>new_name = Ident::new(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"n0des_sim_{name}"</span>), Span::call_site());
+<a href=#30 id=30 data-nosnippet>30</a>    <span class="macro">quote!</span> {
+<a href=#31 id=31 data-nosnippet>31</a>        <span class="attr">#[tokio::test]
+<a href=#32 id=32 data-nosnippet>32</a>        </span><span class="kw">async fn </span>#new_name() -&gt; ::anyhow::Result&lt;()&gt; {
+<a href=#33 id=33 data-nosnippet>33</a>            #input_fn
+<a href=#34 id=34 data-nosnippet>34</a>
+<a href=#35 id=35 data-nosnippet>35</a>            ::iroh_n0des::simulation::run_sim_fn(#name_str, #name).<span class="kw">await
+<a href=#36 id=36 data-nosnippet>36</a>        </span>}
+<a href=#37 id=37 data-nosnippet>37</a>    }
+<a href=#38 id=38 data-nosnippet>38</a>    .into()
+<a href=#39 id=39 data-nosnippet>39</a>}
+</code></pre></div></section></main></body></html>

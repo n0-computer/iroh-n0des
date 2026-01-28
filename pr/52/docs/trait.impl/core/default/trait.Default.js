@@ -1,0 +1,9 @@
+(function() {
+    const implementors = Object.fromEntries([["iroh_n0des",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"enum\" href=\"iroh_n0des/caps/enum.Caps.html\" title=\"enum iroh_n0des::caps::Caps\">Caps</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"iroh_n0des/simulation/struct.Builder.html\" title=\"struct iroh_n0des::simulation::Builder\">Builder</a>&lt;<a class=\"primitive\" href=\"https://doc.rust-lang.org/nightly/std/primitive.unit.html\">()</a>&gt;",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"iroh_n0des/simulation/trace/struct.LineWriter.html\" title=\"struct iroh_n0des::simulation::trace::LineWriter\">LineWriter</a>",0],["impl&lt;C: Capability + <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/cmp/trait.Ord.html\" title=\"trait core::cmp::Ord\">Ord</a>&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"iroh_n0des/caps/struct.CapSet.html\" title=\"struct iroh_n0des::caps::CapSet\">CapSet</a>&lt;C&gt;",0]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":59,"fragment_lengths":[1425]}
