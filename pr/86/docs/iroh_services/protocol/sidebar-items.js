@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["ALPN"],"enum":["ClientHostProtocol","IrohServicesProtocol","NetDiagnosticsMessage","RemoteError","ServicesMessage"],"struct":["Auth","GrantCap","NameEndpoint","Ping","Pong","PutMetrics","PutNetworkDiagnostics","RunNetworkDiagnostics","SetAttributes","SetGroup"],"type":["IrohServicesClient","RemoteResult"]};

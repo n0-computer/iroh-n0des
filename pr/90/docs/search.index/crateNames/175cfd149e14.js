@@ -1,1 +1,0 @@
-rd_("miroh_services")

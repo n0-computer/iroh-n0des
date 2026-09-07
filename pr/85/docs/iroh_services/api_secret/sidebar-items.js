@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["API_SECRET_ENV_VAR_NAME"],"struct":["ApiSecret"]};

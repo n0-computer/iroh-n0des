@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"enum":["FileLoggerError","InstallError","SetFilterError"],"fn":["file_layer","install","layer"],"struct":["FileLoggerConfig","LogCollector","Rotation","WorkerGuard"]};
