@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ALPN","CLIENT_HOST_ALPN","IROH_SERVICES_VERSION"],"enum":["BuildError","Error","RemoteError","ValidateAttributesError","ValidateNameError"],"fn":["preset"],"mod":["api_secret","caps","net_diagnostics"],"static":["IROH_VERSION"],"struct":["ApiToken","Client","ClientBuilder","ClientHost","IrohServicesPreset","Pong","PresetBuilder","Registry"]};
